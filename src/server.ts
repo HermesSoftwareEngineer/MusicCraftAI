@@ -11,7 +11,10 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { workspace, ROOT, blankScore } from './store.ts';
 import { toMEI, measureXmlId } from './mei.ts';
 import type { NoteMeta } from './mei.ts';
-import { renderLive } from './render.ts';
+import { renderLive, pagedSvgs } from './render.ts';
+import { svgPagesToPdf } from './pdf.ts';
+import { staffCount } from './model.ts';
+import type { Doc } from './store.ts';
 import { openInSibelius } from './sibelius.ts';
 import { registerTools, INSTRUCTIONS } from './tools.ts';
 
@@ -25,7 +28,30 @@ const BUILD = Date.now(); // a página recarrega se o servidor reiniciar
 // ---------------- render + broadcast ----------------
 
 const clients = new Set<WebSocket>();
-let lastScore: string | null = null;
+const pagedClients = new Set<WebSocket>(); // navegadores no modo "páginas"
+let lastMsg: Record<string, unknown> | null = null;
+let pagesCache = { key: '', html: '' };
+
+function pagesOf(d: Doc): string[] {
+  return d.kind === 'score' ? pagedSvgs(toMEI(d.score), staffCount(d.score)) : pagedSvgs(d.raw, 4);
+}
+
+function pagesHtmlFor(d: Doc): string {
+  const key = `${d.name}@${d.version}`;
+  if (pagesCache.key !== key) pagesCache = { key, html: pagesOf(d).map((p) => `<div class="page">${p}</div>`).join('') };
+  return pagesCache.html;
+}
+
+/** Envia a última renderização a um navegador, no modo (contínuo/páginas) que ele escolheu. */
+function sendScore(c: WebSocket, resend = false) {
+  if (!lastMsg || c.readyState !== WebSocket.OPEN) return;
+  let msg = resend ? { ...lastMsg, changed: [] } : lastMsg;
+  const d = workspace.currentOrNull;
+  if (lastMsg.type === 'score' && pagedClients.has(c) && d && d.name === lastMsg.doc) {
+    try { msg = { ...msg, svg: pagesHtmlFor(d), paged: true }; } catch { /* cai para o contínuo */ }
+  }
+  c.send(JSON.stringify(msg));
+}
 let pending: ReturnType<typeof setTimeout> | null = null;
 let changedIds = new Set<string>();
 let lastLabel = '';
@@ -47,12 +73,11 @@ function renderActive() {
   pending = null;
   const d = workspace.currentOrNull;
   if (!d) {
-    lastScore = JSON.stringify({ type: 'empty', build: BUILD });
-    broadcast(lastScore);
-    pending = null;
+    lastMsg = { type: 'empty', build: BUILD };
+    for (const c of clients) sendScore(c);
     return;
   }
-  let msg: object;
+  let msg: Record<string, unknown>;
   try {
     const meta = new Map<string, NoteMeta>();
     const r = d.kind === 'score' ? renderLive(toMEI(d.score, meta), meta) : renderLive(d.raw);
@@ -66,8 +91,8 @@ function renderActive() {
   }
   changedIds = new Set();
   lastLabel = '';
-  lastScore = JSON.stringify(msg);
-  broadcast(lastScore);
+  lastMsg = msg;
+  for (const c of clients) sendScore(c);
 }
 
 const scheduleRender = () => { if (!pending) pending = setTimeout(renderActive, 30); };
@@ -76,7 +101,7 @@ let autoOpened = false;
 workspace.on((e) => {
   if (e.type === 'workspace') {
     broadcast(workspaceMsg());
-    if (!lastScore || (JSON.parse(lastScore).doc ?? null) !== workspace.active) { changedIds = new Set(); scheduleRender(); }
+    if (!lastMsg || (lastMsg.doc ?? null) !== workspace.active) { changedIds = new Set(); scheduleRender(); }
     return;
   }
   broadcast(workspaceMsg()); // título pode ter mudado
@@ -139,6 +164,18 @@ const httpServer = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(readFileSync(join(ROOT, 'public', 'index.html')));
   }
+  if (url.pathname === '/pdf' && req.method === 'GET') {
+    const d = workspace.currentOrNull;
+    if (!d) return json(res, 404, { error: 'nenhum arquivo aberto' });
+    try {
+      const pdf = await svgPagesToPdf(pagesOf(d), d.title);
+      const fname = `${d.name.replace(/\.[^.]+$/, '')}.pdf`;
+      res.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${fname.replace(/[^\w.-]/g, '_')}"` });
+      return res.end(pdf);
+    } catch (e) {
+      return json(res, 500, { error: String((e as Error).message ?? e) });
+    }
+  }
   if (url.pathname === '/health') return json(res, 200, { ok: true, name: 'partitura-mcp', active: workspace.active, version: workspace.currentOrNull?.version ?? null, viewers: clients.size });
 
   if (url.pathname === '/mcp') {
@@ -180,7 +217,7 @@ httpServer.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     clients.add(ws);
     ws.send(workspaceMsg());
-    if (lastScore) ws.send(lastScore); else renderActive();
+    if (lastMsg) sendScore(ws, true); else renderActive();
     ws.on('message', (data) => {
       // ações do visualizador: abas, arquivos, desfazer/refazer
       let m: { type?: string; name?: string; title?: string; newName?: string };
@@ -195,6 +232,10 @@ httpServer.on('upgrade', (req, socket, head) => {
           if (!d) throw new Error('Nenhum arquivo aberto.');
           const path = openInSibelius(d);
           ws.send(JSON.stringify({ type: 'toast', message: `Abrindo no Sibelius: ${basename(path)}` }));
+        }
+        if (m.type === 'view') {
+          if ((m as { pages?: boolean }).pages) pagedClients.add(ws); else pagedClients.delete(ws);
+          sendScore(ws, true);
         }
         if (m.type === 'rename' && m.name && m.newName?.trim()) {
           const n = workspace.rename(m.name, m.newName.trim());
@@ -216,7 +257,7 @@ httpServer.on('upgrade', (req, socket, head) => {
         ws.send(JSON.stringify({ type: 'toast', message: String((e as Error).message ?? e) }));
       }
     });
-    ws.on('close', () => clients.delete(ws));
+    ws.on('close', () => { clients.delete(ws); pagedClients.delete(ws); });
   });
 });
 

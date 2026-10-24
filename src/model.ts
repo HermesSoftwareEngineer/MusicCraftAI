@@ -77,6 +77,8 @@ export interface Score {
   measures: Measure[];
 }
 
+export const staffCount = (s: Score) => s.parts.reduce((n, p) => n + p.clefs.length, 0);
+
 export const newId = () => randomUUID().replace(/-/g, '').slice(0, 8);
 
 // ---------- letra (várias estrofes) ----------

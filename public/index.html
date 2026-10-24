@@ -97,6 +97,18 @@
     border-radius: 3px; padding: 8px; transition: width .15s; cursor: pointer;
   }
   #paper svg { display: block; width: 100%; height: auto; }
+  /* modo páginas: cada página A4 como uma folha */
+  #paper.paged { background: transparent; box-shadow: none; padding: 0; }
+  #paper.paged .page { background: #fff; margin: 0 auto 24px; box-shadow: 0 1px 3px rgba(0,0,0,.14), 0 8px 24px rgba(0,0,0,.1); border-radius: 2px; aspect-ratio: 210 / 297; }
+  #paper.paged .page svg { width: 100%; height: 100%; }
+  #viewMode.on { background: var(--ink); color: var(--bar); border-color: var(--ink); }
+  @media print {
+    @page { size: A4; margin: 0; }
+    header, aside, #tabs, #hint, #error, #toast { display: none !important; }
+    body, main, .layout, .content { background: #fff !important; padding: 0 !important; margin: 0 !important; display: block !important; }
+    #paper { width: auto !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }
+    #paper.paged .page { box-shadow: none; margin: 0; border-radius: 0; width: 210mm; height: 297mm; break-after: page; }
+  }
   #empty { text-align: center; color: #888; padding: 80px 20px; }
   #error { display: none; margin: 0 auto 16px; max-width: 900px; padding: 10px 14px; border-radius: 6px; background: #fee2e2; color: #7f1d1d; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
   /* compassos alterados piscam */
@@ -123,6 +135,8 @@
     </select>
     <input type="range" id="vol" min="0" max="1" step="0.05" value="0.8" title="Volume">
     <a class="btn" id="midi" download="partitura.mid" title="Baixar MIDI">MIDI</a>
+    <button id="viewMode" title="Alternar entre rolagem contínua e páginas A4 (como impresso)">📄 Páginas</button>
+    <a class="btn" id="pdf" href="/pdf" title="Baixar PDF (páginas A4)">PDF</a>
     <button id="sib" title="Exporta MusicXML e abre no Sibelius (ouça com o NotePerformer, diagrame e imprima)">Abrir no Sibelius</button>
   </div>
   <div class="group">
@@ -296,6 +310,7 @@ function show(msg) {
   $('undo').disabled = !msg.canUndo;
   $('redo').disabled = !msg.canRedo;
   const y = switched ? 0 : scrollY;
+  paper.classList.toggle('paged', !!msg.paged);
   paper.innerHTML = msg.svg;
   scrollTo(0, y);
   const els = (msg.changed || []).map((id) => document.getElementById(id)).filter(Boolean);
@@ -311,7 +326,7 @@ function show(msg) {
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => $('dot').classList.add('on');
+  ws.onopen = () => { $('dot').classList.add('on'); if (pagedMode) send({ type: 'view', pages: true }); };
   ws.onmessage = (e) => show(JSON.parse(e.data));
   ws.onclose = () => { $('dot').classList.remove('on'); setTimeout(connect, 1000); };
 }
@@ -522,6 +537,11 @@ $('play').onclick = toggle;
 $('vol').oninput = () => { if (player.master) player.master.gain.value = Number($('vol').value); };
 $('speed').onchange = () => { if (player.playing) player.play(player.now()); };
 $('sib').onclick = () => send({ type: 'open-sibelius' });
+let pagedMode = store.get('paged') === '1';
+const syncViewBtn = () => { $('viewMode').classList.toggle('on', pagedMode); $('viewMode').textContent = pagedMode ? '📄 Páginas' : '📜 Contínuo'; };
+syncViewBtn();
+$('viewMode').onclick = () => { pagedMode = !pagedMode; store.set('paged', pagedMode ? '1' : '0'); syncViewBtn(); send({ type: 'view', pages: pagedMode }); };
+$('pdf').onclick = () => toast('Gerando PDF…');
 
 // clicar num compasso toca a partir dele
 paper.addEventListener('click', (e) => {

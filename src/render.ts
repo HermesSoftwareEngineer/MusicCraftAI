@@ -21,6 +21,7 @@ const BASE = {
   pageMarginBottom: 60,
   font: 'Leipzig',
   condense: 'none',
+  justifyVertically: false,
 };
 
 export interface PlayNote {
@@ -107,8 +108,11 @@ export function loadAny(data: string): { ok: boolean; log: string; pages: number
   return { ok, log: tk.getLog(), pages: ok ? tk.getPageCount() : 0 };
 }
 
-export function pagedSvgs(mei: string): string[] {
-  tk.setOptions({ ...BASE, pageWidth: 2100, pageHeight: 2970, adjustPageHeight: false, scale: 40 });
+/** Páginas A4. A escala diminui com o número de pautas para caberem mais sistemas por página. */
+export function pagedSvgs(mei: string, staves = 1): string[] {
+  const scale = staves <= 2 ? 40 : staves <= 4 ? 36 : staves <= 6 ? 32 : staves <= 9 ? 28 : 24;
+  tk.setOptions({ ...BASE, pageWidth: 2100, pageHeight: 2970, adjustPageHeight: false, scale, justifyVertically: true,
+    pageMarginTop: 80, pageMarginBottom: 80, pageMarginLeft: 80, pageMarginRight: 80 });
   tk.loadData(mei);
   const out: string[] = [];
   for (let i = 1; i <= tk.getPageCount(); i++) out.push(tk.renderToSVG(i));

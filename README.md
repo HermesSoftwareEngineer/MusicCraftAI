@@ -69,13 +69,18 @@ claude mcp add --scope user partitura -- "C:/Program Files/nodejs/node.exe" --di
 | `transpose` | Transposição por intervalo (`M2`, `-m3`, `P8`…) |
 | `undo` / `redo` | Histórico (até 200 passos) |
 | `snapshot` | PNG da partitura, para a IA conferir o resultado |
-| `export_score` | MusicXML, MEI, MIDI, SVG (pasta `scores/`) |
+| `export_score` | MusicXML, MEI, MIDI, SVG e **PDF** em páginas A4 (pasta `scores/`) |
 | `list_files` / `open_file` / `close_file` / `rename_file` / `duplicate_file` | Arquivos e abas |
 | `delete_file` / `list_trash` / `restore_file` | Exclusão para a lixeira (`data/lixeira`) e restauração |
 | `set_lyrics` | Distribui o texto de uma estrofe nas notas (hífens = sílabas, `~` = elisão, `_` = melisma) |
 | `set_chords` | Cifras por compasso e tempo: `"F C7/F@3 F@4 \| C6 C7 F/C C/Bb"` |
 | `open_in_sibelius` | Abre no Sibelius (NotePerformer, diagramação, impressão) |
 | `open_viewer` | Abre o visualizador |
+
+## Páginas e PDF
+
+- **📄 Páginas / 📜 Contínuo** alterna entre a rolagem contínua e a visualização em folhas A4, como impresso. A escala se ajusta ao número de pautas e os sistemas se distribuem na página.
+- **PDF** baixa a partitura em páginas A4 (vetorial). O PDF é gerado pelo Chrome ou Edge instalado, em modo invisível. Também dá para usar Ctrl+P no modo páginas.
 
 ## Arquivos, abas e "arquivo ativo"
 

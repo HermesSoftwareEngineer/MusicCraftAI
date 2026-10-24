@@ -7,13 +7,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Barline, Clef, Event, Measure, Part, Score } from './model.ts';
 import {
   INSTRUMENTS, emptyMeasure, intervalFifths, makePart, measureContexts, parseInterval, parseMeasures,
-  transposePitch, voiceDur, voiceToString, setLyric, parseChordMeasure, chordsToString, verseCount,
+  transposePitch, voiceDur, voiceToString, staffCount, setLyric, parseChordMeasure, chordsToString, verseCount,
 } from './model.ts';
 import { flatten } from './analyze.ts';
 import { toMEI } from './mei.ts';
 import { toMusicXML } from './musicxml.ts';
 import { renderMidi, renderPng, pagedSvgs } from './render.ts';
 import { openInSibelius } from './sibelius.ts';
+import { svgPagesToPdf } from './pdf.ts';
 import { workspace, SCORES_DIR, slug } from './store.ts';
 import type { Doc } from './store.ts';
 
@@ -516,14 +517,19 @@ Atenção: sobraram ${left} sílaba(s) sem nota: "${syl.slice(k, k + 8).join(' '
 
   // ---------------- arquivos ----------------
 
-  reg('export_score', `Exporta o arquivo ativo (ou "file") para ${SCORES_DIR}. musicxml abre no Sibelius/MuseScore/Finale/Dorico.`, {
-    format: z.enum(['musicxml', 'mei', 'midi', 'svg']),
+  reg('export_score', `Exporta o arquivo ativo (ou "file") para ${SCORES_DIR}. musicxml abre no Sibelius/MuseScore/Finale/Dorico; pdf = partitura em páginas A4 pronta para imprimir.`, {
+    format: z.enum(['musicxml', 'mei', 'midi', 'svg', 'pdf']),
     filename: z.string().optional().describe('Nome do arquivo sem extensão (padrão: o nome do documento)'),
   }, ({ format, filename }) => {
     const s = doc.score;
     const name = filename ?? doc.name.replace(/\.json$/i, '');
+    if (format === 'pdf') {
+      const target = safeFile(name, 'pdf');
+      return svgPagesToPdf(pagedSvgs(toMEI(s), staffCount(s)), s.title)
+        .then((buf) => { writeFileSync(target, buf); return text(`PDF exportado: ${target}`); });
+    }
     if (format === 'svg') {
-      const pages = pagedSvgs(toMEI(s));
+      const pages = pagedSvgs(toMEI(s), staffCount(s));
       const paths = pages.map((svg, i) => { const p = safeFile(`${name}-${i + 1}`, 'svg'); writeFileSync(p, svg); return p; });
       return text(`Exportado em ${paths.length} página(s):\n${paths.join('\n')}`);
     }

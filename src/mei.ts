@@ -133,11 +133,12 @@ export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
     staffGrp += p.clefs.length > 1 ? `<staffGrp symbol="brace" bar.thru="true">${label}${defs}</staffGrp>` : defs;
   }
   // cabeçalho: o Verovio (header: 'auto') monta título/compositor a partir do titleStmt
-  const resp = [
-    score.composer ? `<persName role="composer">${esc(score.composer)}</persName>` : '',
-    score.lyricist ? `<persName role="lyricist">${esc(score.lyricist)}</persName>` : '',
+  // cabeçalho: o Verovio (header: 'auto') mostra título, subtítulo e os <composer> à direita
+  const people = [
+    score.composer ? `<composer>${esc(score.composer)}</composer>` : '',
+    score.lyricist ? `<composer>Letra: ${esc(score.lyricist)}</composer>` : '',
   ].join('');
-  const titleStmt = `<titleStmt><title>${esc(score.title ?? '')}</title>${score.subtitle ? `<title type="subtitle">${esc(score.subtitle)}</title>` : ''}${resp ? `<respStmt>${resp}</respStmt>` : ''}</titleStmt>`;
+  const titleStmt = `<titleStmt><title>${esc(score.title ?? '')}</title>${score.subtitle ? `<title type="subtitle">${esc(score.subtitle)}</title>` : ''}${people}</titleStmt>`;
 
   // ---- compassos ----
   const body: string[] = [];

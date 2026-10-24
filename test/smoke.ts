@@ -54,6 +54,17 @@ if (img) writeFileSync(join(dir, 'snap.png'), Buffer.from(img.data, 'base64'));
 for (const f of ['musicxml', 'midi', 'mei']) expectOk(await call('export_score', { format: f, filename: 'ode' }), `export ${f}`);
 expectErr(await call('export_score', { format: 'musicxml', filename: '../../hack' }).then(() => (existsSync(join(dir, '..', 'hack.musicxml')) ? { isError: false } : { isError: true })), 'path traversal');
 
+// ---- PDF e páginas ----
+expectOk(await call('export_score', { format: 'pdf', filename: 'ode' }), 'export pdf');
+const pdfFile = join(dir, 'scores', 'ode.pdf');
+if (!existsSync(pdfFile) || readFileSync(pdfFile).subarray(0, 5).toString() !== '%PDF-') { fails++; console.log('PDF INVÁLIDO'); }
+const httpPdf = await fetch(`http://localhost:${PORT}/pdf`);
+if (httpPdf.headers.get('content-type') !== 'application/pdf') { fails++; console.log('GET /pdf falhou', httpPdf.status); }
+ws.send(JSON.stringify({ type: 'view', pages: true }));
+await new Promise((r) => setTimeout(r, 1500));
+if (!frames.some((f) => f.type === 'score' && f.paged && String(f.svg).includes('class="page"'))) { fails++; console.log('MODO PÁGINAS NÃO RESPONDEU'); }
+ws.send(JSON.stringify({ type: 'view', pages: false }));
+
 // ---- cifras e estrofes ----
 expectOk(await call('set_chords', { start: 1, chords: 'D A7@3 | A D/F#@3 G@4 | Bm7b5 E7sus4@2.5 | -' }), 'cifras');
 expectErr(await call('set_chords', { start: 1, chords: 'H7' }), 'cifra inválida');
