@@ -1,0 +1,23 @@
+{
+  "name": "partitura-mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP local para criar e editar partituras com renderização ao vivo (Verovio).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "bridge": "node --disable-warning=ExperimentalWarning src/bridge.ts",
+    "test": "node --disable-warning=ExperimentalWarning test/smoke.ts",
+    "demo": "node --disable-warning=ExperimentalWarning test/demo.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@resvg/resvg-js": "^2.6.2",
+    "verovio": "^6.3.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  }
+}

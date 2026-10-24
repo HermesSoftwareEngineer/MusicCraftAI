@@ -1,0 +1,8 @@
+node_modules/
+# dados locais do usuário (partituras, estado, backups) não vão para o repositório
+data/
+scores/
+.venv/
+__pycache__/
+test/_*
+*.log
