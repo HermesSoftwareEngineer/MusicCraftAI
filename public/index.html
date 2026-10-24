@@ -116,6 +116,7 @@
     </select>
     <input type="range" id="vol" min="0" max="1" step="0.05" value="0.8" title="Volume">
     <a class="btn" id="midi" download="partitura.mid" title="Baixar MIDI">MIDI</a>
+    <button id="sib" title="Exporta MusicXML e abre no Sibelius (ouça com o NotePerformer, diagrame e imprima)">Abrir no Sibelius</button>
   </div>
   <div class="group">
     <button id="undo" title="Desfazer (Ctrl+Z)" disabled>↶</button>
@@ -175,6 +176,7 @@ const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.bottom
 const fmt = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const totalMs = () => score.notes.reduce((m, n) => Math.max(m, n.t + n.d), 0);
 
+let currentVersion = null;
 let currentDoc = null, ws_state = { files: [], tabs: [], active: null };
 
 function toast(t) {
@@ -241,6 +243,7 @@ function show(msg) {
   const switched = msg.doc !== currentDoc;
   if (switched && player.playing) player.stop();
   currentDoc = msg.doc;
+  currentVersion = msg.version;
   $('title').textContent = msg.title || 'Partitura';
   document.title = `${msg.title || 'Partitura'} — ao vivo`;
   $('roBadge').hidden = msg.kind !== 'view';
@@ -254,7 +257,7 @@ function show(msg) {
   els.forEach((el) => el.classList.add('flash'));
   requestAnimationFrame(() => setTimeout(() => els.forEach((el) => el.classList.remove('flash')), 250));
   if ($('follow').checked && els.length && !els.some(onScreen)) els[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  score = { notes: msg.notes || [], measures: msg.measures || [] };
+  score = { notes: applyDynamics(msg.notes || []), measures: msg.measures || [] };
   $('midi').href = 'data:audio/midi;base64,' + msg.midi;
   $('midi').download = `${(msg.title || 'partitura').replace(/[^\w\-]+/g, '_')}.mid`;
   if (!player.playing) $('time').textContent = `0:00 / ${fmt(totalMs())}`;
@@ -268,6 +271,29 @@ function connect() {
   ws.onclose = () => { $('dot').classList.remove('on'); setTimeout(connect, 1000); };
 }
 connect();
+
+// ================= Dinâmicas: nível por nota (p, f, crescendos…) =================
+const LEVEL = { pppp: .22, ppp: .3, pp: .4, p: .52, mp: .66, mf: .8, f: .95, ff: 1.1, fff: 1.22, ffff: 1.32, fp: .52 };
+function applyDynamics(notes) {
+  const byPart = {};
+  for (const n of notes) (byPart[n.part] ??= []).push(n);
+  for (const list of Object.values(byPart)) {
+    list.sort((a, b) => a.t - b.t);
+    let cur = LEVEL.mf, ramp = null;
+    for (const n of list) {
+      const explicit = LEVEL[n.dynam];
+      if (ramp && n.hairpin?.includes('end')) {
+        const target = explicit ?? Math.max(.2, Math.min(1.32, ramp.from + .3 * ramp.dir));
+        for (const m of ramp.notes) m.lvl = ramp.from + (target - ramp.from) * ((m.t - ramp.t) / Math.max(1, n.t - ramp.t));
+        cur = target; ramp = null;
+      } else if (explicit !== undefined) cur = explicit;
+      n.lvl = cur;
+      if (ramp) ramp.notes.push(n);
+      if (n.hairpin?.some((h) => h !== 'end')) ramp = { t: n.t, from: cur, dir: n.hairpin.includes('cresc') ? 1 : -1, notes: [] };
+    }
+  }
+  return notes;
+}
 
 // ================= Sintetizador (Web Audio, sem dependências) =================
 
@@ -318,7 +344,7 @@ const player = {
     const ctx = this.ctx, tb = timbre(n.prog);
     const freq = 440 * Math.pow(2, (n.p - 69) / 12);
     const g = ctx.createGain();
-    const vel = 0.18 * (tb.gain || 1);
+    const vel = 0.18 * (tb.gain || 1) * (n.lvl ?? 1) * (n.accent ? 1.35 : 1);
     let o, end;
     if (tb.kind === 'piano') {
       o = this.osc('piano', freq, when);
@@ -363,6 +389,8 @@ const player = {
     src.stop(end);
   },
 
+  now() { return this.posMs(this.ctx.currentTime); },
+
   play(fromMs = 0) {
     const ctx = this.ensureCtx();
     this.stop(false);
@@ -400,7 +428,7 @@ const player = {
 
   frame() {
     if (!this.playing) return;
-    const pos = this.posMs(this.ctx.currentTime);
+    const pos = this.now();
     $('time').textContent = `${fmt(pos)} / ${fmt(this.total)}`;
     // realce
     const want = new Set();
@@ -447,7 +475,8 @@ const player = {
 function toggle() { if (player.playing) player.stop(); else player.play(0); }
 $('play').onclick = toggle;
 $('vol').oninput = () => { if (player.master) player.master.gain.value = Number($('vol').value); };
-$('speed').onchange = () => { if (player.playing) player.play(player.posMs(player.ctx.currentTime)); };
+$('speed').onchange = () => { if (player.playing) player.play(player.now()); };
+$('sib').onclick = () => send({ type: 'open-sibelius' });
 
 // clicar num compasso toca a partir dele
 paper.addEventListener('click', (e) => {

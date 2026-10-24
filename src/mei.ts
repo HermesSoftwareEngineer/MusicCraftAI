@@ -24,7 +24,14 @@ const GES: Record<number, string> = { 1: 's', [-1]: 'f', 2: 'ss', [-2]: 'ff' };
 export function measureXmlId(id: string) { return `m_${id}`; }
 
 /** Info por nota (id do SVG) para o player do navegador. */
-export interface NoteMeta { program: number; tieFrom?: string }
+export interface NoteMeta {
+  program: number;
+  part: string;
+  tieFrom?: string;
+  dynam?: string; // dinâmica escrita nesta nota
+  hairpin?: ('cresc' | 'dim' | 'end')[];
+  accent?: boolean;
+}
 
 export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
   const ctx = measureContexts(score);
@@ -37,8 +44,9 @@ export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
   // numeração global de pautas
   const staffN = new Map<string, number>();
   const staffProgram = new Map<number, number>();
+  const staffPart = new Map<number, string>();
   let n = 0;
-  for (const p of score.parts) p.clefs.forEach((_, s) => { staffN.set(`${p.id}.${s}`, ++n); staffProgram.set(n, p.program); });
+  for (const p of score.parts) p.clefs.forEach((_, s) => { staffN.set(`${p.id}.${s}`, ++n); staffProgram.set(n, p.program); staffPart.set(n, p.id); });
   const tieFrom = new Map<Pitch, Pitch>(an.ties.map((t) => [t.to, t.from]));
 
   const controls: string[][] = score.measures.map(() => []);
@@ -47,7 +55,10 @@ export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
 
   function pitchXml(p: Pitch, ev: NoteEvent, chordChild: boolean, extra: string, staff: number): string {
     const tf = tieFrom.get(p);
-    meta?.set(idOf(p), { program: staffProgram.get(staff) ?? 0, tieFrom: tf ? idOf(tf) : undefined });
+    meta?.set(idOf(p), {
+      program: staffProgram.get(staff) ?? 0, part: staffPart.get(staff) ?? '', tieFrom: tf ? idOf(tf) : undefined,
+      dynam: ev.dynam, hairpin: ev.hairpin, accent: ev.artic?.some((x) => x === 'acc' || x === 'marc'),
+    });
     let a = `xml:id="${idOf(p)}" pname="${p.step.toLowerCase()}" oct="${p.octave}"`;
     if (!chordChild) {
       a += ` dur="${ev.dur}"`;

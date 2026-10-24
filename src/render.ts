@@ -23,7 +23,10 @@ const BASE = {
   condense: 'none',
 };
 
-export interface PlayNote { t: number; d: number; p: number; prog: number; ids: string[] }
+export interface PlayNote {
+  t: number; d: number; p: number; prog: number; ids: string[];
+  part: string; dynam?: string; hairpin?: ('cresc' | 'dim' | 'end')[]; accent?: boolean;
+}
 export interface Rendered { svg: string; midi: string; notes: PlayNote[]; measures: { t: number; id: string }[]; log: string }
 
 /** Página contínua para o visualizador no navegador, com a lista de notas para o player. */
@@ -52,7 +55,10 @@ export function renderLive(mei: string, meta: Map<string, NoteMeta> = new Map(),
         byId.set(id, root);
         continue;
       }
-      const n = { t: v.time, d: v.duration, p: v.pitch, prog: m?.program ?? 0, ids: [id] };
+      const n: PlayNote = {
+        t: v.time, d: v.duration, p: v.pitch, prog: m?.program ?? 0, ids: [id],
+        part: m?.part ?? '', dynam: m?.dynam, hairpin: m?.hairpin, accent: m?.accent,
+      };
       notes.push(n);
       byId.set(id, n);
     }

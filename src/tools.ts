@@ -12,6 +12,7 @@ import {
 import { toMEI } from './mei.ts';
 import { toMusicXML } from './musicxml.ts';
 import { renderMidi, renderPng, pagedSvgs } from './render.ts';
+import { openInSibelius } from './sibelius.ts';
 import { workspace, SCORES_DIR, slug } from './store.ts';
 import type { Doc } from './store.ts';
 
@@ -489,6 +490,11 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     const d = workspace.create(src.score.title, JSON.parse(JSON.stringify(src.score)), new_name ?? `${src.name.replace(/\.json$/i, '')}-copia`);
     return text(`Cópia criada e ativa: ${d.name}.`);
   });
+
+  reg('open_in_sibelius', 'Exporta o arquivo ativo (ou "file") como MusicXML e o abre no Sibelius instalado no computador do usuário — onde ele pode ouvir com o NotePerformer, ajustar a diagramação e imprimir.', {}, () => {
+    const path = openInSibelius(doc);
+    return text(`Abrindo no Sibelius: ${path}\n(o Sibelius mostra a janela de importação de MusicXML; confirme para abrir).`);
+  }, false, true);
 
   regWs('open_viewer', 'Abre o visualizador ao vivo no navegador do usuário.', {}, () => {
     ctx.openViewer();

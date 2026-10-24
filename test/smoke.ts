@@ -22,6 +22,7 @@ const client = new Client({ name: 'smoke', version: '1' });
 await client.connect(new StdioClientTransport({ command: process.execPath, args: [...flags, 'src/bridge.ts'], env }));
 const tools = await client.listTools();
 console.log('ferramentas:', tools.tools.map((t) => t.name).join(', '));
+if (!tools.tools.some((t) => t.name === 'open_in_sibelius')) { console.log('FALTA open_in_sibelius'); }
 
 let fails = 0;
 async function call(name: string, args: any = {}) {

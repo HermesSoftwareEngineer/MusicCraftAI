@@ -3,7 +3,7 @@
 
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -12,6 +12,7 @@ import { workspace, ROOT, blankScore } from './store.ts';
 import { toMEI, measureXmlId } from './mei.ts';
 import type { NoteMeta } from './mei.ts';
 import { renderLive } from './render.ts';
+import { openInSibelius } from './sibelius.ts';
 import { registerTools, INSTRUCTIONS } from './tools.ts';
 
 const PORT = Number(process.env.PARTITURA_PORT ?? 4700);
@@ -183,6 +184,10 @@ httpServer.on('upgrade', (req, socket, head) => {
         if (m.type === 'redo' && d.kind === 'score') d.redo();
         if (m.type === 'open' && m.name) workspace.open(m.name, true);
         if (m.type === 'close' && m.name) workspace.close(m.name);
+        if (m.type === 'open-sibelius') {
+          const path = openInSibelius(d);
+          ws.send(JSON.stringify({ type: 'toast', message: `Abrindo no Sibelius: ${basename(path)}` }));
+        }
         if (m.type === 'new') {
           const title = (m.title ?? '').trim() || 'Sem título';
           workspace.create(title, blankScore(title));
