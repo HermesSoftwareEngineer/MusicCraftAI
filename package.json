@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "bridge": "node --disable-warning=ExperimentalWarning src/bridge.ts",
-    "test": "node --disable-warning=ExperimentalWarning test/smoke.ts",
+    "test": "node --disable-warning=ExperimentalWarning test/smoke.ts && node --disable-warning=ExperimentalWarning test/roundtrip.ts",
     "demo": "node --disable-warning=ExperimentalWarning test/demo.ts"
   },
   "engines": {
@@ -16,6 +16,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@resvg/resvg-js": "^2.6.2",
+    "fast-xml-parser": "^5.11.2",
     "verovio": "^6.3.0",
     "ws": "^8.22.0",
     "zod": "^4.6.7"

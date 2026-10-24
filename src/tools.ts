@@ -568,6 +568,16 @@ Atenção: sobraram ${left} sílaba(s) sem nota: "${syl.slice(k, k + 8).join(' '
     file: z.string(), new_name: z.string().describe('Novo nome, sem extensão'),
   }, ({ file, new_name }) => text(`Renomeado para ${workspace.rename(file, new_name)}.`));
 
+  regWs('import_musicxml', 'Converte um MusicXML (.musicxml/.xml) da pasta de partituras — por exemplo exportado do Sibelius, MuseScore, Finale ou Dorico — numa partitura EDITÁVEL (.json), que abre como arquivo ativo. O original não é alterado. Converte instrumentos transpositores para som real.', {
+    file: z.string().describe('Arquivo MusicXML (nome, com ou sem extensão)'),
+    new_name: z.string().optional().describe('Nome do .json (padrão: o mesmo do MusicXML)'),
+  }, ({ file, new_name }) => {
+    const { doc: d, warnings } = workspace.importXml(file, new_name);
+    const s = d.score;
+    return text(`Importado como ${d.name} (ativo): "${s.title}", ${s.parts.length} parte(s), ${s.measures.length} compassos.`
+      + (warnings.length ? `\nAvisos:\n  ${warnings.slice(0, 15).join('\n  ')}` : ''));
+  });
+
   server.registerTool('delete_file', {
     description: 'Exclui um arquivo da pasta de partituras movendo-o para a lixeira (data/lixeira) — dá para recuperar com restore_file. Só use quando o usuário pedir explicitamente.',
     inputSchema: { file: z.string() },

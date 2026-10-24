@@ -71,11 +71,19 @@ claude mcp add --scope user partitura -- "C:/Program Files/nodejs/node.exe" --di
 | `snapshot` | PNG da partitura, para a IA conferir o resultado |
 | `export_score` | MusicXML, MEI, MIDI, SVG e **PDF** em páginas A4 (pasta `scores/`) |
 | `list_files` / `open_file` / `close_file` / `rename_file` / `duplicate_file` | Arquivos e abas |
+| `import_musicxml` | Converte um MusicXML (Sibelius, MuseScore, Finale, Dorico…) em partitura editável |
 | `delete_file` / `list_trash` / `restore_file` | Exclusão para a lixeira (`data/lixeira`) e restauração |
 | `set_lyrics` | Distribui o texto de uma estrofe nas notas (hífens = sílabas, `~` = elisão, `_` = melisma) |
 | `set_chords` | Cifras por compasso e tempo: `"F C7/F@3 F@4 \| C6 C7 F/C C/Bb"` |
 | `open_in_sibelius` | Abre no Sibelius (NotePerformer, diagramação, impressão) |
 | `open_viewer` | Abre o visualizador |
+
+## Importar MusicXML
+
+- **Arraste** arquivos `.musicxml`, `.xml`, `.mei` ou `.json` para a página, ou use ⇪ na barra lateral, e eles vão para `scores/`.
+- Um MusicXML abre só para visualização. **✎ Tornar editável** (ou `import_musicxml`) cria uma cópia `.json` editável; o original fica intacto.
+- A importação cobre partes, claves, armaduras, fórmulas, andamento, ritornelos, notas, acordes, até 4 vozes por pauta, quiálteras, ligaduras, apojaturas, articulações, fermatas, dinâmicas, crescendos, textos, letra (várias estrofes) e cifras. Instrumentos transpositores, com suas cifras e armaduras, são convertidos para som real.
+- `npm test` inclui um teste de ida e volta: exportar para MusicXML e importar de novo deve dar exatamente a mesma partitura.
 
 ## Páginas e PDF
 

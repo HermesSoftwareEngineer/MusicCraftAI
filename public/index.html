@@ -84,6 +84,11 @@
   .badge { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: var(--line); color: var(--muted); font-weight: 500; }
   #aiTarget { font-size: 12px; color: var(--muted); white-space: nowrap; }
   #aiTarget b { color: var(--play); }
+  body.dropping::after {
+    content: 'Solte para enviar à pasta de partituras (.musicxml, .xml, .mei, .json)'; position: fixed; inset: 12px; z-index: 60;
+    display: flex; align-items: center; justify-content: center; border: 3px dashed var(--play); border-radius: 14px;
+    background: color-mix(in srgb, var(--bg) 85%, transparent); color: var(--ink); font-size: 18px; font-weight: 600;
+  }
   #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #111; color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 50; }
   #toast.on { opacity: .92; }
   @media (max-width: 760px) {
@@ -124,6 +129,7 @@
   <span class="dot" id="dot" title="Conexão com o servidor"></span>
   <h1 id="title">Partitura</h1>
   <span id="roBadge" class="badge" hidden>só visualização</span>
+  <button id="makeEditable" hidden title="Converte este MusicXML numa partitura editável (.json); o original fica intacto">✎ Tornar editável</button>
   <span id="aiTarget" title="As edições da IA (sem indicar arquivo) vão para o arquivo ativo">IA edita: <b id="aiFile">—</b></span>
   <span id="label"></span>
   <div class="group">
@@ -151,6 +157,8 @@
   <aside id="side">
     <div class="side-head">
       <h2>Arquivos</h2>
+      <button id="upBtn" title="Enviar arquivos (.musicxml, .xml, .mei, .json) — ou arraste para a página">⇪</button>
+      <input type="file" id="upInput" multiple accept=".musicxml,.xml,.mei,.json" hidden>
       <button id="newBtn" title="Nova partitura">+ Nova</button>
     </div>
     <div id="newbox"><input id="newTitle" placeholder="Título da nova partitura"><button id="newOk">Criar</button></div>
@@ -306,6 +314,7 @@ function show(msg) {
   $('title').textContent = msg.title || 'Partitura';
   document.title = `${msg.title || 'Partitura'} — ao vivo`;
   $('roBadge').hidden = msg.kind !== 'view';
+  $('makeEditable').hidden = !(msg.kind === 'view' && /\.(musicxml|xml)$/i.test(msg.doc || ''));
   $('label').textContent = msg.label ? `última edição: ${msg.label}` : '';
   $('undo').disabled = !msg.canUndo;
   $('redo').disabled = !msg.canRedo;
@@ -537,6 +546,33 @@ $('play').onclick = toggle;
 $('vol').oninput = () => { if (player.master) player.master.gain.value = Number($('vol').value); };
 $('speed').onchange = () => { if (player.playing) player.play(player.now()); };
 $('sib').onclick = () => send({ type: 'open-sibelius' });
+$('makeEditable').onclick = () => currentDoc && send({ type: 'import', name: currentDoc });
+
+// ---- envio de arquivos (botão ou arrastar e soltar) ----
+async function uploadFiles(files) {
+  let lastName = null;
+  for (const f of files) {
+    try {
+      const r = await fetch(`/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      toast(`Enviado: ${j.name}`);
+      lastName = j.name;
+    } catch (e) { toast(`Falha ao enviar ${f.name}: ${e.message}`); }
+  }
+  if (lastName) send({ type: 'open', name: lastName });
+}
+$('upBtn').onclick = () => $('upInput').click();
+$('upInput').onchange = () => { uploadFiles([...$('upInput').files]); $('upInput').value = ''; };
+let dragDepth = 0;
+addEventListener('dragenter', (e) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth++; document.body.classList.add('dropping'); } });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); });
+addEventListener('drop', (e) => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
+  uploadFiles([...e.dataTransfer.files]);
+});
 let pagedMode = store.get('paged') === '1';
 const syncViewBtn = () => { $('viewMode').classList.toggle('on', pagedMode); $('viewMode').textContent = pagedMode ? '📄 Páginas' : '📜 Contínuo'; };
 syncViewBtn();

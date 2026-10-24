@@ -6,6 +6,7 @@ import { join, dirname, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Score } from './model.ts';
 import { emptyMeasure, makePart, normalizeScore } from './model.ts';
+import { importMusicXML } from './importxml.ts';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = process.env.PARTITURA_DATA ?? join(ROOT, 'data');
@@ -271,6 +272,32 @@ export class Workspace {
     if (this.active === name) this.active = [...this.docs.keys()].at(-1) ?? null;
     this.saveState();
     this.emit({ type: 'workspace' });
+  }
+
+  /** Converte um MusicXML da pasta numa partitura editável (.json) e a abre como ativa. */
+  importXml(ref: string, newBase?: string): { doc: Doc; warnings: string[] } {
+    const name = this.resolveName(ref);
+    const ext = extname(name).toLowerCase();
+    if (ext !== '.musicxml' && ext !== '.xml') throw new Error(`"${name}" não é MusicXML (.musicxml/.xml).`);
+    const { score, warnings } = importMusicXML(readFileSync(join(SCORES_DIR, name), 'utf8'));
+    const doc = this.create(score.title, score, newBase ?? basename(name, extname(name)));
+    return { doc, warnings };
+  }
+
+  /** Grava um arquivo enviado pelo navegador na pasta de partituras. */
+  upload(fileName: string, data: Buffer): string {
+    const b = basename(fileName);
+    const ext = extname(b).toLowerCase();
+    if (![EDITABLE_EXT, ...VIEW_EXTS].includes(ext)) throw new Error(`Tipo de arquivo não aceito (${ext || 'sem extensão'}). Envie .musicxml, .xml, .mei ou .json.`);
+    if (ext === EDITABLE_EXT) {
+      const sc = JSON.parse(data.toString('utf8')) as Score;
+      if (!Array.isArray(sc?.parts) || !Array.isArray(sc?.measures)) throw new Error('Esse .json não é uma partitura deste servidor.');
+    }
+    const target = this.uniqueName(slug(basename(b, ext)), ext);
+    this.selfWrites.set(target, Date.now());
+    writeFileSync(join(SCORES_DIR, target), data);
+    this.emit({ type: 'workspace' });
+    return target;
   }
 
   /** "Exclui" movendo para data/lixeira (recuperável com restore). Devolve o nome na lixeira. */

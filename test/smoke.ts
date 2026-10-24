@@ -12,7 +12,10 @@ const dir = mkdtempSync(join(tmpdir(), 'partitura-'));
 const env = { ...process.env, PARTITURA_PORT: PORT, PARTITURA_DATA: dir, PARTITURA_SCORES: join(dir, 'scores'), PARTITURA_NO_BROWSER: '1' } as Record<string, string>;
 const flags = ['--disable-warning=ExperimentalWarning'];
 const daemon = spawn(process.execPath, [...flags, 'src/server.ts'], { env, stdio: ['ignore', 'inherit', 'inherit'] });
-await new Promise((r) => setTimeout(r, 1500));
+for (let i = 0; i < 100; i++) { // espera o servidor ficar pronto
+  try { if ((await fetch(`http://localhost:${PORT}/health`)).ok) break; } catch { /* ainda subindo */ }
+  await new Promise((r) => setTimeout(r, 200));
+}
 
 const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
 const frames: any[] = [];
@@ -92,6 +95,19 @@ const listing = lf.content[0].text as string;
 for (const n of ['ode_a_alegria.json', 'segunda_peca.json', 'ode-versao-b.json', 'ode.musicxml']) if (!listing.includes(n)) { fails++; console.log('FALTA NA LISTA:', n); }
 const info = await call('score_info', { file: 'segunda_peca' });
 if (!info.content[0].text.includes('segunda_peca.json')) { fails++; console.log('score_info sem arquivo'); }
+
+// ---- importar MusicXML para edição / enviar arquivos ----
+const up = await fetch(`http://localhost:${PORT}/upload?name=${encodeURIComponent('Peça Enviada.musicxml')}`, { method: 'POST', body: readFileSync(join(dir, 'scores', 'ode.musicxml')) });
+const upJ: any = await up.json();
+if (upJ.name !== 'peca_enviada.musicxml') { fails++; console.log('UPLOAD FALHOU', upJ); }
+const bad = await fetch(`http://localhost:${PORT}/upload?name=virus.exe`, { method: 'POST', body: 'x' });
+if (bad.status !== 400) { fails++; console.log('UPLOAD ACEITOU .exe'); }
+const imp = await call('import_musicxml', { file: 'peca_enviada' });
+expectOk(imp, 'importar musicxml');
+if (!String(imp.content[0].text).includes('peca_enviada.json')) { fails++; console.log('IMPORT SEM ARQUIVO'); }
+const impRead = (await call('read_measures', { from: 1, to: 1 })).content[0].text as string;
+if (!impRead.includes('P1.s1.v1:')) { fails++; console.log('IMPORT SEM NOTAS'); }
+expectOk(await call('write_measures', { part: 1, start: 1, music: 'C5/1' }), 'editar importado');
 
 // ---- renomear / excluir (lixeira) / restaurar ----
 expectOk(await call('rename_file', { file: 'ode-versao-b', new_name: 'Versão B' }), 'renomear');

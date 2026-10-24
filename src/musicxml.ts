@@ -127,7 +127,13 @@ export function toMusicXML(score: Score): string {
             const below = (inner: string) => `<direction placement="below"><direction-type>${inner}</direction-type>${staffTag}</direction>`;
             if (e.dynam) dirs.push(below(`<dynamics><${e.dynam}/></dynamics>`));
             if (e.text) dirs.push(`<direction placement="above"><direction-type><words font-style="italic">${esc(e.text)}</words></direction-type>${staffTag}</direction>`);
-            if (e.kind === 'note') for (const h of e.hairpin ?? []) {
+            // crescendo/diminuendo: início antes da nota; fim DEPOIS da nota onde termina
+            // (se a mesma nota encerra um e abre outro, o fim vai antes do novo início)
+            const hps = e.kind === 'note' ? e.hairpin ?? [] : [];
+            const startsNew = hps.some((h) => h !== 'end');
+            const endAfter = hps.includes('end') && !startsNew;
+            for (const h of hps) {
+              if (h === 'end' && endAfter) continue;
               dirs.push(below(h === 'end' ? '<wedge type="stop"/>' : `<wedge type="${h === 'cresc' ? 'crescendo' : 'diminuendo'}"/>`));
             }
             let dur = Math.round(baseDur(e.dur, e.dots) * DIV * (tup ? tup.numbase / tup.num : 1));
@@ -178,6 +184,7 @@ export function toMusicXML(score: Score): string {
               parts.push('</note>');
               out.push(parts.join(''));
             });
+            if (endAfter) out.push(below('<wedge type="stop"/>'));
             written += dur;
           };
           const walk = (segs: Seg[], tup: { num: number; numbase: number } | null) => {

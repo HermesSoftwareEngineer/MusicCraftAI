@@ -164,6 +164,22 @@ const httpServer = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(readFileSync(join(ROOT, 'public', 'index.html')));
   }
+  if (url.pathname === '/upload' && req.method === 'POST') {
+    if (!originAllowed(req)) return json(res, 403, { error: 'origem não permitida' });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const c of req) {
+      size += (c as Buffer).length;
+      if (size > 25 * 1024 * 1024) return json(res, 413, { error: 'arquivo maior que 25 MB' });
+      chunks.push(c as Buffer);
+    }
+    try {
+      const name = workspace.upload(url.searchParams.get('name') ?? '', Buffer.concat(chunks));
+      return json(res, 200, { name });
+    } catch (e) {
+      return json(res, 400, { error: String((e as Error).message ?? e) });
+    }
+  }
   if (url.pathname === '/pdf' && req.method === 'GET') {
     const d = workspace.currentOrNull;
     if (!d) return json(res, 404, { error: 'nenhum arquivo aberto' });
@@ -232,6 +248,10 @@ httpServer.on('upgrade', (req, socket, head) => {
           if (!d) throw new Error('Nenhum arquivo aberto.');
           const path = openInSibelius(d);
           ws.send(JSON.stringify({ type: 'toast', message: `Abrindo no Sibelius: ${basename(path)}` }));
+        }
+        if (m.type === 'import' && m.name) {
+          const { doc: nd, warnings } = workspace.importXml(m.name);
+          ws.send(JSON.stringify({ type: 'toast', message: `Editável: ${nd.name}${warnings.length ? ` (${warnings.length} aviso(s): ${warnings[0]})` : ''}` }));
         }
         if (m.type === 'view') {
           if ((m as { pages?: boolean }).pages) pagedClients.add(ws); else pagedClients.delete(ws);
