@@ -38,6 +38,7 @@ function workspaceMsg() {
   return JSON.stringify({
     type: 'workspace', build: BUILD, active: workspace.active,
     files: workspace.listFiles(),
+    trash: workspace.listTrash().slice(0, 30),
     tabs: [...workspace.docs.values()].map((d) => ({ name: d.name, title: d.title, kind: d.kind })),
   });
 }
@@ -182,7 +183,7 @@ httpServer.on('upgrade', (req, socket, head) => {
     if (lastScore) ws.send(lastScore); else renderActive();
     ws.on('message', (data) => {
       // ações do visualizador: abas, arquivos, desfazer/refazer
-      let m: { type?: string; name?: string; title?: string };
+      let m: { type?: string; name?: string; title?: string; newName?: string };
       try { m = JSON.parse(String(data)); } catch { return; }
       try {
         const d = workspace.currentOrNull;
@@ -194,6 +195,18 @@ httpServer.on('upgrade', (req, socket, head) => {
           if (!d) throw new Error('Nenhum arquivo aberto.');
           const path = openInSibelius(d);
           ws.send(JSON.stringify({ type: 'toast', message: `Abrindo no Sibelius: ${basename(path)}` }));
+        }
+        if (m.type === 'rename' && m.name && m.newName?.trim()) {
+          const n = workspace.rename(m.name, m.newName.trim());
+          ws.send(JSON.stringify({ type: 'toast', message: `Renomeado para ${n}` }));
+        }
+        if (m.type === 'delete' && m.name) {
+          workspace.remove(m.name);
+          ws.send(JSON.stringify({ type: 'toast', message: `"${m.name}" foi para a lixeira` }));
+        }
+        if (m.type === 'restore' && m.name) {
+          const n = workspace.restore(m.name);
+          ws.send(JSON.stringify({ type: 'toast', message: `Restaurado: ${n}` }));
         }
         if (m.type === 'new') {
           const title = (m.title ?? '').trim() || 'Sem título';

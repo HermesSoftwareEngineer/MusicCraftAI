@@ -71,6 +71,10 @@ claude mcp add --scope user partitura -- "C:/Program Files/nodejs/node.exe" --di
 | `snapshot` | PNG da partitura, para a IA conferir o resultado |
 | `export_score` | MusicXML, MEI, MIDI, SVG (pasta `scores/`) |
 | `list_files` / `open_file` / `close_file` / `rename_file` / `duplicate_file` | Arquivos e abas |
+| `delete_file` / `list_trash` / `restore_file` | Exclusão para a lixeira (`data/lixeira`) e restauração |
+| `set_lyrics` | Distribui o texto de uma estrofe nas notas (hífens = sílabas, `~` = elisão, `_` = melisma) |
+| `set_chords` | Cifras por compasso e tempo: `"F C7/F@3 F@4 \| C6 C7 F/C C/Bb"` |
+| `open_in_sibelius` | Abre no Sibelius (NotePerformer, diagramação, impressão) |
 | `open_viewer` | Abre o visualizador |
 
 ## Arquivos, abas e "arquivo ativo"
@@ -79,7 +83,7 @@ claude mcp add --scope user partitura -- "C:/Program Files/nodejs/node.exe" --di
 - A **barra lateral** do visualizador lista os arquivos da pasta, com busca. Os `.musicxml`, `.xml` e `.mei` abrem **só para visualização**.
 - Clicar num arquivo abre uma **aba** e o torna o **arquivo ativo**. O cabeçalho mostra "IA edita: <arquivo>".
 - Sem dizer o nome, a IA edita o arquivo ativo. Para mirar outro, peça "altere o arquivo X": as ferramentas aceitam `file` e passam a deixar esse arquivo ativo. O botão ⧉ copia o nome do arquivo.
-- "+ Nova" cria uma partitura em branco. `duplicate_file` cria uma cópia para testar versões.
+- "+ Nova" cria uma partitura em branco. ✎ renomeia (ou duplo clique na aba) e 🗑 exclui, mandando para a **Lixeira**, de onde dá para restaurar. `duplicate_file` cria uma cópia para testar versões.
 
 ## Notação compacta
 
@@ -91,6 +95,8 @@ C4/4[cresc(] … E4/4[cresc),f]
 C4/4[lyr:A-] D4[lyr:le-] E4[lyr:gri] F4[lyr:a]
 compassos separados por |
 ```
+
+Outras estrofes: `lyr2:`, `lyr3:`… (ou use `set_lyrics`).
 
 Articulações: `stacc acc ten marc stacciss`. Também há `ferm` (fermata), `grace` (apojatura), as dinâmicas `pppp`…`ffff sf sfz fp…` e o texto `txt:"dolce"`.
 

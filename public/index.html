@@ -61,8 +61,15 @@
   .file .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .file .sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .file .open-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex: none; }
-  .file .copy { visibility: hidden; border: none; min-height: 0; padding: 2px 4px; font-size: 12px; color: var(--muted); }
-  .file:hover .copy { visibility: visible; }
+  .file .act { visibility: hidden; border: none; min-height: 0; padding: 2px 4px; font-size: 12px; color: var(--muted); }
+  .file:hover .act { visibility: visible; }
+  .file .act:hover { color: var(--ink); }
+  .file .act.del:hover { color: var(--bad); }
+  details.trash { margin-top: 8px; }
+  details.trash summary { cursor: pointer; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 10px 8px 4px; }
+  .trash-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; color: var(--muted); }
+  .trash-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trash-item button { min-height: 0; padding: 2px 6px; font-size: 11px; }
   .side-foot { border-top: 1px solid var(--line); padding: 10px 12px; font-size: 12px; color: var(--muted); }
   .side-foot b { color: var(--ink); }
   .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -201,22 +208,48 @@ function renderWorkspace() {
       <div class="meta"><div class="nm">${esc(f.name)}</div>
         <div class="sub">${f.active ? 'ativo · ' : ''}${new Date(f.mtime).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</div></div>
       ${f.open && !f.active ? '<span class="open-dot" title="Aberto em aba"></span>' : ''}
-      <button class="copy" data-copy="${esc(f.name)}" title="Copiar nome (para pedir à IA)">⧉</button></div>`;
+      <button class="act" data-copy="${esc(f.name)}" title="Copiar nome (para pedir à IA)">⧉</button>
+      <button class="act" data-rename="${esc(f.name)}" title="Renomear">✎</button>
+      <button class="act del" data-delete="${esc(f.name)}" title="Excluir (vai para a lixeira)">🗑</button></div>`;
   const scores = files.filter((f) => f.kind === 'score' && match(f));
   const views = files.filter((f) => f.kind === 'view' && match(f));
   $('files').innerHTML =
     (scores.length ? `<div class="grp">Partituras editáveis</div>${scores.map(item).join('')}` : '') +
     (views.length ? `<div class="grp">Só visualização (MusicXML/MEI)</div>${views.map(item).join('')}` : '') +
-    (!scores.length && !views.length ? '<div class="grp">Nenhum arquivo</div>' : '');
+    (!scores.length && !views.length ? '<div class="grp">Nenhum arquivo</div>' : '') +
+    ((ws_state.trash || []).length ? `<details class="trash"${trashOpen ? ' open' : ''}><summary>Lixeira (${ws_state.trash.length})</summary>${ws_state.trash.map((t) => `
+      <div class="trash-item" title="Excluído em ${esc(t.when)}"><span>🗑 ${esc(t.name)}</span><button data-restore="${esc(t.trashed)}">restaurar</button></div>`).join('')}</details>` : '');
 }
 
+$('tabs').addEventListener('dblclick', (e) => {
+  const t = e.target.closest('.tab');
+  if (t && !e.target.closest('[data-close]')) renameFile(t.dataset.name);
+});
 $('tabs').addEventListener('click', (e) => {
   const x = e.target.closest('[data-close]');
   if (x) { e.stopPropagation(); send({ type: 'close', name: x.dataset.close }); return; }
   const t = e.target.closest('.tab');
   if (t) send({ type: 'open', name: t.dataset.name });
 });
+let trashOpen = false;
+$('files').addEventListener('toggle', (e) => { if (e.target.matches?.('details.trash')) trashOpen = e.target.open; }, true);
+function renameFile(name) {
+  const base = name.replace(/\.[^.]+$/, '');
+  const nn = prompt(`Novo nome para "${name}" (sem extensão):`, base);
+  if (nn && nn.trim() && nn.trim() !== base) send({ type: 'rename', name, newName: nn.trim() });
+}
 $('files').addEventListener('click', (e) => {
+  const rn = e.target.closest('[data-rename]');
+  if (rn) { e.stopPropagation(); renameFile(rn.dataset.rename); return; }
+  const dl = e.target.closest('[data-delete]');
+  if (dl) {
+    e.stopPropagation();
+    if (confirm(`Mover "${dl.dataset.delete}" para a lixeira?
+(dá para restaurar depois)`)) send({ type: 'delete', name: dl.dataset.delete });
+    return;
+  }
+  const rs = e.target.closest('[data-restore]');
+  if (rs) { e.stopPropagation(); send({ type: 'restore', name: rs.dataset.restore }); return; }
   const c = e.target.closest('[data-copy]');
   if (c) {
     e.stopPropagation();

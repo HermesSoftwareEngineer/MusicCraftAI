@@ -1,6 +1,6 @@
 // Teste ponta a ponta: daemon + ponte stdio + cliente MCP + WebSocket do visualizador.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -54,6 +54,18 @@ if (img) writeFileSync(join(dir, 'snap.png'), Buffer.from(img.data, 'base64'));
 for (const f of ['musicxml', 'midi', 'mei']) expectOk(await call('export_score', { format: f, filename: 'ode' }), `export ${f}`);
 expectErr(await call('export_score', { format: 'musicxml', filename: '../../hack' }).then(() => (existsSync(join(dir, '..', 'hack.musicxml')) ? { isError: false } : { isError: true })), 'path traversal');
 
+// ---- cifras e estrofes ----
+expectOk(await call('set_chords', { start: 1, chords: 'D A7@3 | A D/F#@3 G@4 | Bm7b5 E7sus4@2.5 | -' }), 'cifras');
+expectErr(await call('set_chords', { start: 1, chords: 'H7' }), 'cifra inválida');
+expectOk(await call('set_lyrics', { part: 'P1', verse: 2, text: 'A-le-gri-a, be-la cen-te-lha, _ fi-lha do E-lí-si-o' }), 'estrofe 2');
+const rm = await call('read_measures', { from: 1, to: 2 });
+const rmText = rm.content[0].text as string;
+if (!rmText.includes('cifras P1: D A7@3') || !rmText.includes('lyr2:A-')) { fails++; console.log('FALTOU cifra/estrofe na leitura'); }
+expectOk(await call('export_score', { format: 'musicxml', filename: 'ode-cifras' }), 'export com cifras');
+const xmlOut = readFileSync(join(dir, 'scores', 'ode-cifras.musicxml'), 'utf8');
+if (!xmlOut.includes('<harmony') || !xmlOut.includes('<kind text="7">dominant</kind>') || !xmlOut.includes('<lyric number="2">')) { fails++; console.log('MusicXML sem harmony/lyric 2'); }
+expectOk(await call('set_lyrics', { part: 'P1', verse: 2, text: '' }), 'apagar estrofe 2');
+
 // ---- vários arquivos ----
 expectOk(await call('score_new', { title: 'Segunda peça', parts: [{ instrument: 'cello' }], measures: 2 }), 'segundo arquivo');
 expectOk(await call('write_measures', { part: 1, start: 1, music: 'C3/1 | G2/1' }), 'escreve no ativo (segunda)');
@@ -69,6 +81,16 @@ const listing = lf.content[0].text as string;
 for (const n of ['ode_a_alegria.json', 'segunda_peca.json', 'ode-versao-b.json', 'ode.musicxml']) if (!listing.includes(n)) { fails++; console.log('FALTA NA LISTA:', n); }
 const info = await call('score_info', { file: 'segunda_peca' });
 if (!info.content[0].text.includes('segunda_peca.json')) { fails++; console.log('score_info sem arquivo'); }
+
+// ---- renomear / excluir (lixeira) / restaurar ----
+expectOk(await call('rename_file', { file: 'ode-versao-b', new_name: 'Versão B' }), 'renomear');
+expectOk(await call('delete_file', { file: 'versao_b' }), 'excluir');
+if (existsSync(join(dir, 'scores', 'versao_b.json'))) { fails++; console.log('EXCLUIR NÃO REMOVEU'); }
+const trash = (await call('list_trash', {})).content[0].text as string;
+if (!trash.includes('versao_b.json')) { fails++; console.log('LIXEIRA SEM O ARQUIVO'); }
+expectOk(await call('restore_file', { file: 'versao_b' }), 'restaurar');
+if (!existsSync(join(dir, 'scores', 'versao_b.json'))) { fails++; console.log('RESTAURAR FALHOU'); }
+expectErr(await call('restore_file', { file: 'nao_existe' }), 'restaurar inexistente');
 
 // ---- fechar todas as abas não cria arquivos novos (bug do "Sem título" infinito) ----
 const before = (await call('list_files', {})).content[0].text.split(String.fromCharCode(10)).length;

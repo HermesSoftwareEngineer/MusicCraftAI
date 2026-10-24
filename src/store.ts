@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, statSy
 import { join, dirname, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Score } from './model.ts';
-import { emptyMeasure, makePart } from './model.ts';
+import { emptyMeasure, makePart, normalizeScore } from './model.ts';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const DATA_DIR = process.env.PARTITURA_DATA ?? join(ROOT, 'data');
@@ -40,6 +40,7 @@ export function blankScore(title = 'Sem título'): Score {
 // ---------- backup automático: data/backups/<arquivo>/<data-hora>.json ----------
 
 export const BACKUP_DIR = join(DATA_DIR, 'backups');
+export const TRASH_DIR = join(DATA_DIR, 'lixeira');
 const BACKUP_EVERY_MS = 5 * 60 * 1000;
 const BACKUP_KEEP = 50;
 const lastBackup = new Map<string, number>();
@@ -83,7 +84,7 @@ export class Doc {
     if (this.kind === 'score') {
       const sc = JSON.parse(text) as Score;
       if (!Array.isArray(sc.parts) || !Array.isArray(sc.measures)) throw new Error(`${this.name} não é uma partitura deste servidor.`);
-      this.score = sc;
+      this.score = normalizeScore(sc);
     } else {
       this.raw = text;
     }
@@ -270,6 +271,41 @@ export class Workspace {
     if (this.active === name) this.active = [...this.docs.keys()].at(-1) ?? null;
     this.saveState();
     this.emit({ type: 'workspace' });
+  }
+
+  /** "Exclui" movendo para data/lixeira (recuperável com restore). Devolve o nome na lixeira. */
+  remove(ref: string): string {
+    const name = this.resolveName(ref);
+    mkdirSync(TRASH_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const trashed = `${stamp}__${name}`;
+    this.docs.delete(name);
+    if (this.active === name) this.active = [...this.docs.keys()].at(-1) ?? null;
+    renameSync(join(SCORES_DIR, name), join(TRASH_DIR, trashed));
+    this.saveState();
+    this.emit({ type: 'workspace' });
+    return trashed;
+  }
+
+  listTrash(): { trashed: string; name: string; when: string }[] {
+    if (!existsSync(TRASH_DIR)) return [];
+    return readdirSync(TRASH_DIR).filter((f) => f.includes('__')).sort().reverse().map((f) => {
+      const [stamp, ...rest] = f.split('__');
+      return { trashed: f, name: rest.join('__'), when: stamp.replace(/T(\d\d)-(\d\d)-(\d\d)/, ' $1:$2:$3') };
+    });
+  }
+
+  /** Restaura da lixeira (o item mais recente com esse nome, ou o nome exato da lixeira). */
+  restore(ref: string): string {
+    const items = this.listTrash();
+    const it = items.find((x) => x.trashed === ref) ?? items.find((x) => x.name.toLowerCase() === ref.toLowerCase()
+      || basename(x.name, extname(x.name)).toLowerCase() === ref.toLowerCase());
+    if (!it) throw new Error(`"${ref}" não está na lixeira.`);
+    const ext = extname(it.name);
+    const target = this.uniqueName(basename(it.name, ext), ext);
+    renameSync(join(TRASH_DIR, it.trashed), join(SCORES_DIR, target));
+    this.emit({ type: 'workspace' });
+    return target;
   }
 
   rename(ref: string, newBase: string): string {

@@ -20,6 +20,9 @@ export interface NoteEvent {
   dynam?: string;
   slur?: ('start' | 'end')[];
   hairpin?: ('cresc' | 'dim' | 'end')[];
+  /** letra por estrofe: [0] = 1ª estrofe; sílaba terminada em "-" continua na próxima nota */
+  lyrics?: (string | null)[];
+  /** formato antigo (só 1ª estrofe) — convertido por normalizeScore */
   lyric?: string;
   text?: string;
 }
@@ -57,9 +60,13 @@ export interface Measure {
   time?: { count: number; unit: number };
   tempo?: { bpm?: number; text?: string };
   barline?: Barline;
+  /** cifras: posição em tempos (1 = início do compasso), texto ("C7/F") e parte onde aparecem */
+  chords?: ChordSymbol[];
   // partId -> pautas -> vozes -> eventos
   content: Record<string, Voice[][]>;
 }
+
+export interface ChordSymbol { beat: number; text: string; part?: string }
 
 export interface Score {
   title: string;
@@ -71,6 +78,72 @@ export interface Score {
 }
 
 export const newId = () => randomUUID().replace(/-/g, '').slice(0, 8);
+
+// ---------- letra (várias estrofes) ----------
+
+export function getLyrics(e: NoteEvent): (string | null)[] {
+  return e.lyrics ?? (e.lyric !== undefined ? [e.lyric] : []);
+}
+
+export function setLyric(e: NoteEvent, verse: number, text: string | null) {
+  const l = getLyrics(e).slice();
+  while (l.length < verse) l.push(null);
+  l[verse - 1] = text;
+  while (l.length && l[l.length - 1] == null) l.pop();
+  delete e.lyric;
+  if (l.length) e.lyrics = l; else delete e.lyrics;
+}
+
+/** Converte formatos antigos (lyric -> lyrics). */
+export function normalizeScore(s: Score): Score {
+  const fix = (evs: Event[]) => evs.forEach((e) => {
+    if (e.kind === 'tuplet') fix(e.events);
+    else if (e.kind === 'note' && e.lyric !== undefined) setLyric(e, 1, e.lyric);
+  });
+  for (const m of s.measures) for (const staves of Object.values(m.content)) for (const st of staves) for (const v of st) fix(v);
+  return s;
+}
+
+/** Quantas estrofes a partitura usa. */
+export function verseCount(s: Score): number {
+  let n = 0;
+  const walk = (evs: Event[]) => evs.forEach((e) => {
+    if (e.kind === 'tuplet') walk(e.events);
+    else if (e.kind === 'note') n = Math.max(n, getLyrics(e).length);
+  });
+  for (const m of s.measures) for (const staves of Object.values(m.content)) for (const st of staves) for (const v of st) walk(v);
+  return n;
+}
+
+// ---------- cifras ----------
+
+/** Texto de exibição: "Bb7/F" -> "B♭7/F", "F#m" -> "F♯m". */
+export function chordDisplay(t: string): string {
+  return t.replace(/([A-G])b/g, '$1♭').replace(/([A-G])#/g, '$1♯');
+}
+
+const CHORD_RE = /^[A-G](#|b)?[^\s@/]*(\/[A-G](#|b)?)?$/;
+
+/**
+ * Uma linha de cifras por compasso: "F C7/F@3 F@4". "@n" = tempo (1 = início; aceita 2.5).
+ * Sem "@", as cifras se espalham igualmente pelo compasso (1 cifra = tempo 1; 2 em 4/4 = tempos 1 e 3…).
+ */
+export function parseChordMeasure(src: string, beats: number): ChordSymbol[] {
+  const toks = src.trim().split(/\s+/).filter(Boolean);
+  if (toks.length === 1 && toks[0] === '-') return [];
+  const out = toks.map((tok, k) => {
+    const [sym, at] = tok.split('@');
+    if (!CHORD_RE.test(sym)) throw new Error(`Cifra inválida "${sym}" (ex.: C, F#m, Bb7, C7/E, Dm7b5, Gsus4)`);
+    const beat = at !== undefined ? Number(at) : 1 + (k * beats) / toks.length;
+    if (!(beat >= 1 && beat < beats + 1)) throw new Error(`Tempo inválido em "${tok}" (o compasso tem ${beats} tempos)`);
+    return { beat: Math.round(beat * 1000) / 1000, text: sym };
+  });
+  return out.sort((a, b) => a.beat - b.beat);
+}
+
+export function chordsToString(cs: ChordSymbol[] | undefined): string {
+  return (cs ?? []).map((c) => (c.beat === 1 ? c.text : `${c.text}@${c.beat}`)).join(' ');
+}
 
 // ---------- instrumentos ----------
 
@@ -232,7 +305,7 @@ function parseMods(lx: Lexer, ev: NoteEvent | RestEvent) {
     lx.ws();
     if (lx.peek() === ']') { lx.i++; return; }
     let raw = '';
-    const kv = /^(lyr|txt):/.exec(lx.s.slice(lx.i));
+    const kv = /^(lyr\d*|txt):/.exec(lx.s.slice(lx.i));
     if (kv) {
       lx.i += kv[0].length;
       let val = '';
@@ -245,7 +318,12 @@ function parseMods(lx: Lexer, ev: NoteEvent | RestEvent) {
         while (lx.i < lx.s.length && !/[,\]]/.test(lx.s[lx.i])) val += lx.s[lx.i++];
         val = val.trim();
       }
-      if (kv[1] === 'lyr') { if (ev.kind !== 'note') lx.err('Letra só pode ir em nota'); ev.lyric = val; } else ev.text = val;
+      if (kv[1].startsWith('lyr')) {
+        if (ev.kind !== 'note') lx.err('Letra só pode ir em nota');
+        const verse = kv[1] === 'lyr' ? 1 : parseInt(kv[1].slice(3), 10);
+        if (!(verse >= 1 && verse <= 12)) lx.err('Estrofe inválida (use lyr, lyr2 … lyr12)');
+        setLyric(ev, verse, val);
+      } else ev.text = val;
     } else {
       while (lx.i < lx.s.length && !/[,\]]/.test(lx.s[lx.i])) raw += lx.s[lx.i++];
       const mod = raw.trim();
@@ -353,7 +431,13 @@ function simpleToString(e: NoteEvent | RestEvent): string {
   }
   if (e.fermata) mods.push('ferm');
   if (e.dynam) mods.push(e.dynam);
-  if (e.kind === 'note' && e.lyric !== undefined) mods.push(/[,\]\s]/.test(e.lyric) ? `lyr:"${e.lyric}"` : `lyr:${e.lyric}`);
+  if (e.kind === 'note') {
+    getLyrics(e).forEach((l, i) => {
+      if (l == null) return;
+      const key = i === 0 ? 'lyr' : `lyr${i + 1}`;
+      mods.push(/[,\]\s"]/.test(l) ? `${key}:"${l}"` : `${key}:${l}`);
+    });
+  }
   if (e.text !== undefined) mods.push(`txt:"${e.text}"`);
   if (mods.length) s += `[${mods.join(',')}]`;
   return s;

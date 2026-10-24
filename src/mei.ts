@@ -1,7 +1,7 @@
 // Score -> MEI 5 para renderização no Verovio.
 
 import type { Clef, Event, NoteEvent, Pitch, RestEvent, Score } from './model.ts';
-import { measureContexts } from './model.ts';
+import { measureContexts, getLyrics, chordDisplay } from './model.ts';
 import type { Analysis, Seg } from './analyze.ts';
 import { analyze, beamLength, segment } from './analyze.ts';
 
@@ -98,14 +98,16 @@ export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
     for (const h of e.hairpin ?? []) if (h !== 'end') st.hp = { mi, ev: e, form: h === 'cresc' ? 'cres' : 'dim' };
 
     let inner = (e.artic ?? []).map((x) => `<artic artic="${x}"/>`).join('');
-    if (e.lyric !== undefined) {
-      const prev = hyph.get(vk) ?? false;
-      const cont = e.lyric.endsWith('-');
-      const txt = cont ? e.lyric.slice(0, -1) : e.lyric;
+    getLyrics(e).forEach((lyr, i) => {
+      if (lyr == null) return;
+      const hk = `${vk}#${i}`;
+      const prev = hyph.get(hk) ?? false;
+      const cont = lyr.endsWith('-');
+      const txt = cont ? lyr.slice(0, -1) : lyr;
       const wordpos = prev ? (cont ? 'm' : 't') : cont ? 'i' : '';
-      hyph.set(vk, cont);
-      inner += `<verse n="1"><syl${wordpos ? ` wordpos="${wordpos}"` : ''}${cont ? ' con="d"' : ''}>${esc(txt)}</syl></verse>`;
-    }
+      hyph.set(hk, cont);
+      inner += `<verse n="${i + 1}"><syl${wordpos ? ` wordpos="${wordpos}"` : ''}${cont ? ' con="d"' : ''}>${esc(txt)}</syl></verse>`;
+    });
     if (e.pitches.length === 1) return pitchXml(e.pitches[0], e, false, inner, staff);
     let a = `xml:id="${idOf(e)}" dur="${e.dur}"`;
     if (e.dots) a += ` dots="${e.dots}"`;
@@ -162,6 +164,11 @@ export function toMEI(score: Score, meta?: Map<string, NoteMeta>): string {
       const metr = m.tempo.bpm ? `<rend glyph.auth="smufl">&#xE1D5;</rend> = ${m.tempo.bpm}` : '';
       const txt = m.tempo.text ? (metr ? `${esc(m.tempo.text)} (${metr})` : esc(m.tempo.text)) : metr;
       controls[mi].unshift(`<tempo staff="1" tstamp="1" place="above"${m.tempo.bpm ? ` midi.bpm="${m.tempo.bpm}"` : ''}>${txt}</tempo>`);
+    }
+    for (const ch of m.chords ?? []) {
+      const part = score.parts.find((p) => p.id === ch.part) ?? score.parts[0];
+      const sn = part ? staffN.get(`${part.id}.0`) : 1;
+      controls[mi].push(`<harm staff="${sn}" tstamp="${ch.beat}" place="above">${esc(chordDisplay(ch.text))}</harm>`);
     }
     let attrs = `xml:id="${measureXmlId(m.id)}" n="${mi + 1}"`;
     const b = m.barline ?? (mi === score.measures.length - 1 ? 'final' : 'single');

@@ -7,8 +7,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Barline, Clef, Event, Measure, Part, Score } from './model.ts';
 import {
   INSTRUMENTS, emptyMeasure, intervalFifths, makePart, measureContexts, parseInterval, parseMeasures,
-  transposePitch, voiceDur, voiceToString,
+  transposePitch, voiceDur, voiceToString, setLyric, parseChordMeasure, chordsToString, verseCount,
 } from './model.ts';
+import { flatten } from './analyze.ts';
 import { toMEI } from './mei.ts';
 import { toMusicXML } from './musicxml.ts';
 import { renderMidi, renderPng, pagedSvgs } from './render.ts';
@@ -29,9 +30,11 @@ NOTAÇÃO COMPACTA (usada em write_measures e devolvida por read_measures):
   articulações: stacc, acc, ten, marc, stacciss | ferm (fermata) | grace (apojatura, não conta tempo)
   dinâmicas: pppp..ffff, sf, sfz, sffz, fp, sfp, rfz, fz
   ligadura de expressão: slur( no início e slur) no fim | crescendo: cresc( … cresc)  | diminuendo: dim( … dim)
-  letra: lyr:pa- (hífen no fim = sílaba continua na próxima nota), lyr:"duas palavras" | texto técnico: txt:"dolce"
+  letra: lyr:pa- (hífen no fim = sílaba continua na próxima nota), lyr:"duas palavras"; outras estrofes: lyr2:, lyr3:… | texto técnico: txt:"dolce"
 - Compassos separados por "|". Cada chamada de write_measures sobrescreve UMA voz (part/staff/voice) nos compassos indicados.
 - Um compasso sem nenhuma nota numa pauta mostra pausa de compasso inteiro automaticamente.
+- LETRA: para estrofes inteiras prefira set_lyrics (texto corrido com hífens; distribui as sílabas sozinho).
+- CIFRAS: use set_chords ("F C7/F@3 F@4 | C6 C7 F/C C/Bb"); read_measures mostra "cifras P1: …".
 
 ARQUIVOS: cada partitura é um arquivo .json na pasta de partituras; o visualizador tem barra lateral e abas.
 - Sem o parâmetro "file", as ferramentas atuam no ARQUIVO ATIVO — o que o usuário selecionou na barra lateral. Quando o usuário falar
@@ -112,6 +115,12 @@ function describeMeasure(score: Score, i: number, partFilter?: Part): string {
   if (m.tempo) tags.push(`tempo ${[m.tempo.text, m.tempo.bpm && `♩=${m.tempo.bpm}`].filter(Boolean).join(' ')}`);
   if (m.barline && m.barline !== 'single') tags.push(`barra ${m.barline}`);
   const lines = [`Compasso ${i + 1}${tags.length ? ` [${tags.join(', ')}]` : ''}`];
+  const chordParts = new Map<string, string[]>();
+  for (const c of m.chords ?? []) {
+    const pid = c.part ?? score.parts[0]?.id ?? '';
+    chordParts.set(pid, [...(chordParts.get(pid) ?? []), c.beat === 1 ? c.text : `${c.text}@${c.beat}`]);
+  }
+  for (const [pid, cs] of chordParts) if (!partFilter || partFilter.id === pid) lines.push(`  cifras ${pid}: ${cs.join(' ')}`);
   for (const p of score.parts) {
     if (partFilter && p !== partFilter) continue;
     p.clefs.forEach((_, s) => {
@@ -163,7 +172,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     return text([
       `Arquivo: ${doc.name} (ativo)`,
       `Título: ${s.title}${s.subtitle ? ` — ${s.subtitle}` : ''}${s.composer ? ` | Compositor: ${s.composer}` : ''}${s.lyricist ? ` | Letra: ${s.lyricist}` : ''}`,
-      `Compassos: ${s.measures.length}`,
+      `Compassos: ${s.measures.length}${verseCount(s) ? ` | Estrofes de letra: ${verseCount(s)}` : ''}${s.measures.some((m) => m.chords?.length) ? ' | Tem cifras' : ''}`,
       'Partes:',
       ...s.parts.map((p) => `  ${p.id}: ${p.name}${p.abbr ? ` (${p.abbr})` : ''} — ${p.clefs.length} pauta(s): ${p.clefs.join(', ')} — MIDI ${p.program}`),
       'Armadura/compasso/tempo:',
@@ -387,6 +396,78 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     });
   });
 
+  reg('set_chords', 'Escreve cifras (símbolos de acorde) acima de uma parte, a partir de um compasso. Um trecho por compasso, separados por "|": "F C7/F@3 F@4 | C6 C7 F/C C/Bb | - | G". "@n" = tempo do compasso (1 = início; aceita 2.5); sem "@", as cifras se distribuem igualmente. "-" ou vazio apaga as cifras daquele compasso. Substitui as cifras existentes nesses compassos.', {
+    start: z.number().int().min(1),
+    chords: z.string(),
+    part: partRef.optional().describe('Parte sobre a qual as cifras aparecem (padrão: a primeira)'),
+  }, (a) => doc.mutate('cifras', (s) => {
+    const ctx = measureContexts(s);
+    const pid = a.part !== undefined ? findPart(s, a.part).id : s.parts[0]?.id;
+    const chunks = a.chords.split('|');
+    if (a.start + chunks.length - 1 > s.measures.length) {
+      throw new Error(`As cifras vão até o compasso ${a.start + chunks.length - 1}, mas a partitura tem ${s.measures.length}.`);
+    }
+    const ids: string[] = [];
+    chunks.forEach((chunk, k) => {
+      const idx = a.start - 1 + k;
+      const m = s.measures[idx];
+      const list = parseChordMeasure(chunk, ctx[idx].time.count).map((c) => ({ ...c, part: pid }));
+      const others = (m.chords ?? []).filter((c) => (c.part ?? s.parts[0]?.id) !== pid);
+      m.chords = [...others, ...list];
+      if (!m.chords.length) delete m.chords;
+      ids.push(m.id);
+    });
+    return { measures: ids, result: text(`Cifras escritas nos compassos ${a.start}-${a.start + chunks.length - 1}${pid ? ` (sobre ${pid})` : ''}.`) };
+  }));
+
+  reg('set_lyrics', 'Distribui o texto de UMA estrofe nas notas de uma voz, a partir de um compasso: cada sílaba vai para a próxima nota (pula pausas, apojaturas e notas ligadas). Sílabas da mesma palavra separadas por hífen ("Nós, mor-tais, por Ti re-mi-dos,"); "~" junta palavras na mesma nota (elisão: "de~a-mor"); "_" deixa uma nota sem sílaba (melisma). Texto vazio apaga a estrofe a partir do compasso inicial.', {
+    part: partRef,
+    text: z.string(),
+    verse: z.number().int().min(1).max(12).default(1).describe('Número da estrofe (1, 2, 3…)'),
+    start: z.number().int().min(1).default(1).describe('Compasso da primeira sílaba'),
+    staff: z.number().int().min(1).default(1),
+    voice: z.number().int().min(1).max(4).default(1),
+  }, (a) => doc.mutate(`letra (estrofe ${a.verse})`, (s) => {
+    const p = findPart(s, a.part);
+    checkRange(s, a.start, a.start);
+    const syl: string[] = [];
+    for (const w of a.text.trim().split(/\s+/).filter(Boolean)) {
+      if (w === '_') { syl.push('_'); continue; }
+      // "~" junta palavras numa sílaba (elisão): "de~a-mor" -> "de a-", "mor"
+      const pieces = w.replace(/~/g, ' ').split('-').filter((x: string) => x !== '');
+      const trailing = w.endsWith('-');
+      pieces.forEach((x: string, i: number) => syl.push(i < pieces.length - 1 || trailing ? `${x}-` : x));
+    }
+    const clearing = syl.length === 0;
+    let k = 0;
+    let lastMeasure = a.start;
+    let prevTie = false;
+    const ids: string[] = [];
+    outer: for (let mi = a.start - 1; mi < s.measures.length; mi++) {
+      const v = s.measures[mi].content[p.id]?.[a.staff - 1]?.[a.voice - 1] ?? [];
+      for (const e of flatten(v)) {
+        if (e.kind === 'rest') { prevTie = false; continue; }
+        if (e.grace) continue;
+        const tiedFromPrev = prevTie;
+        prevTie = !!e.tie;
+        if (tiedFromPrev) continue;
+        if (!clearing && k >= syl.length) break outer;
+        const t = clearing ? null : syl[k++];
+        setLyric(e, a.verse, t === '_' ? null : t);
+        lastMeasure = mi + 1;
+        if (ids.at(-1) !== s.measures[mi].id) ids.push(s.measures[mi].id);
+      }
+    }
+    if (clearing) return { measures: ids, result: text(`Estrofe ${a.verse} apagada a partir do compasso ${a.start}.`) };
+    const left = syl.length - k;
+    return {
+      measures: ids,
+      result: text(`Estrofe ${a.verse}: ${k} sílaba(s) nos compassos ${a.start}-${lastMeasure} de ${p.id}.`
+        + (left > 0 ? `
+Atenção: sobraram ${left} sílaba(s) sem nota: "${syl.slice(k, k + 8).join(' ')}${left > 8 ? ' …' : ''}".` : '')),
+    };
+  }));
+
   reg('transpose', 'Transpõe por intervalo diatônico (ex.: "M2" sobe 2ª maior, "-m3" desce 3ª menor, "P8" sobe oitava). Sem parte/intervalo de compassos, transpõe tudo e ajusta as armaduras.', {
     interval: z.string(),
     from: z.number().int().min(1).optional(), to: z.number().int().min(1).optional(),
@@ -480,6 +561,21 @@ export function registerTools(server: McpServer, ctx: Ctx) {
   regWs('rename_file', 'Renomeia um arquivo da pasta de partituras.', {
     file: z.string(), new_name: z.string().describe('Novo nome, sem extensão'),
   }, ({ file, new_name }) => text(`Renomeado para ${workspace.rename(file, new_name)}.`));
+
+  server.registerTool('delete_file', {
+    description: 'Exclui um arquivo da pasta de partituras movendo-o para a lixeira (data/lixeira) — dá para recuperar com restore_file. Só use quando o usuário pedir explicitamente.',
+    inputSchema: { file: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: true },
+  }, ({ file }) => text(`Movido para a lixeira: ${workspace.remove(file)} (recupere com restore_file).`));
+
+  regWs('list_trash', 'Lista os arquivos na lixeira (excluídos), do mais recente ao mais antigo.', {}, () => {
+    const items = workspace.listTrash();
+    return text(items.length ? items.map((x) => `${x.name}  (excluído em ${x.when})  [${x.trashed}]`).join('\n') : 'Lixeira vazia.');
+  }, true);
+
+  regWs('restore_file', 'Restaura um arquivo da lixeira para a pasta de partituras (se já existir um com o mesmo nome, ganha um sufixo).', {
+    file: z.string().describe('Nome original (restaura a exclusão mais recente) ou o nome exato listado em list_trash'),
+  }, ({ file }) => text(`Restaurado como ${workspace.restore(file)}.`));
 
   regWs('duplicate_file', 'Cria uma cópia editável de um arquivo .json (ex.: para experimentar uma versão alternativa) e a torna ativa.', {
     file: z.string().optional().describe('Arquivo de origem (padrão: o ativo)'),

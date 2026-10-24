@@ -66,6 +66,11 @@ export function renderLive(mei: string, meta: Map<string, NoteMeta> = new Map(),
   return { svg, midi, notes, measures, log };
 }
 
+// glifos SMuFL usados em textos (metrônomo, acidentes de cifras) -> Unicode comum
+const SMUFL_TEXT: Record<string, string> = {
+  '\uE1D5': '♩', '\uE1D7': '♪', '\uEA64': '♭', '\uEA66': '♯', '\uEA65': '♮', '\uE260': '♭', '\uE262': '♯', '\uE261': '♮',
+};
+
 /** PNG de um trecho (para a IA "ver" o resultado). */
 export function renderPng(mei: string, from?: number, to?: number): Buffer {
   tk.setOptions({ ...BASE, pageWidth: 2100, pageHeight: 60000, scale: 45 });
@@ -76,8 +81,10 @@ export function renderPng(mei: string, from?: number, to?: number): Buffer {
   }
   // o resvg não lê a fonte SMuFL embutida via @font-face: troca as figuras de metrônomo por Unicode
   const svg = tk.renderToSVG(1).replace(
-    /<tspan font-family="Leipzig" font-size="(\d+)px">([])<\/tspan>/g,
-    (_, size, g) => `<tspan font-family="Segoe UI Symbol" font-size="${Math.round(+size * 0.6)}px">${g === '' ? '♩' : '♪'}</tspan>`,
+    /<tspan font-family="Leipzig" font-size="(\d+)px">([^<]+)<\/tspan>/g,
+    (m, size, g: string) => [...g].every((ch) => SMUFL_TEXT[ch])
+      ? `<tspan font-family="Segoe UI Symbol" font-size="${Math.round(+size * 0.6)}px">${[...g].map((ch) => SMUFL_TEXT[ch]).join('')}</tspan>`
+      : m,
   );
   const r = new Resvg(svg, {
     background: 'white',

@@ -1,7 +1,7 @@
 // Score -> MusicXML 3.0 (partwise), compatível com Sibelius, MuseScore, Finale, Dorico.
 
 import type { Clef, NoteEvent, Pitch, RestEvent, Score, Voice } from './model.ts';
-import { baseDur, measureContexts } from './model.ts';
+import { baseDur, measureContexts, getLyrics } from './model.ts';
 import type { Seg } from './analyze.ts';
 import { analyze, beamLength, segment } from './analyze.ts';
 import { esc } from './mei.ts';
@@ -21,6 +21,31 @@ const CLEF: Record<Clef, string> = {
   percussion: '<sign>percussion</sign>',
 };
 const BAR: Record<string, string> = { double: 'light-light', final: 'light-heavy', 'repeat-end': 'light-heavy', 'repeat-both': 'light-heavy' };
+
+// ---------- cifras -> <harmony> ----------
+
+const KINDS: [RegExp, string][] = [
+  [/^(maj7|M7|Δ7?|ma7)$/, 'major-seventh'], [/^(m7b5|ø7?|min7b5)$/, 'half-diminished'], [/^(dim7|°7|o7)$/, 'diminished-seventh'],
+  [/^(m7|min7|-7)$/, 'minor-seventh'], [/^(mmaj7|mM7|m\(maj7\))$/, 'major-minor'], [/^(m6|min6)$/, 'minor-sixth'],
+  [/^(m9|min9)$/, 'minor-ninth'], [/^(maj9|M9)$/, 'major-ninth'], [/^(m|min|-)$/, 'minor'], [/^(dim|°|o)$/, 'diminished'],
+  [/^(aug|\+)$/, 'augmented'], [/^(7sus4|7sus)$/, 'suspended-fourth'], [/^(sus4|sus)$/, 'suspended-fourth'], [/^sus2$/, 'suspended-second'],
+  [/^6$/, 'major-sixth'], [/^7$/, 'dominant'], [/^9$/, 'dominant-ninth'], [/^11$/, 'dominant-11th'], [/^13$/, 'dominant-13th'],
+  [/^(5)$/, 'power'], [/^$/, 'major'],
+];
+
+function stepAlter(t: string) {
+  return `<root-step>${t[0]}</root-step>${t[1] === '#' ? '<root-alter>1</root-alter>' : t[1] === 'b' ? '<root-alter>-1</root-alter>' : ''}`;
+}
+
+function harmonyXml(text: string, offset: number, staffTag: string): string {
+  const m = /^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/.exec(text);
+  if (!m) return '';
+  const [, root, quality, bass] = m;
+  const kind = KINDS.find(([re]) => re.test(quality))?.[1];
+  const kindXml = kind ? `<kind text="${esc(quality)}">${kind}</kind>` : `<kind text="${esc(quality)}">major</kind>`;
+  const bassXml = bass ? `<bass><bass-step>${bass[0]}</bass-step>${bass[1] === '#' ? '<bass-alter>1</bass-alter>' : bass[1] === 'b' ? '<bass-alter>-1</bass-alter>' : ''}</bass>` : '';
+  return `<harmony print-frame="no"><root>${stepAlter(root)}</root>${kindXml}${bassXml}${offset ? `<offset>${offset}</offset>` : ''}${staffTag}</harmony>`;
+}
 
 export function toMusicXML(score: Score): string {
   const ctx = measureContexts(score);
@@ -77,9 +102,21 @@ export function toMusicXML(score: Score): string {
         if (!voices.length) chunks.push({ staff: s, voice: s * 4 + 1, v: null });
         else voices.forEach(({ v, vi }) => chunks.push({ staff: s, voice: s * 4 + vi + 1, v }));
       });
+      // cifras desta parte, em divisões a partir do início do compasso
+      const unit = c.time.unit;
+      const chordQ = (m.chords ?? []).filter((c) => (c.part ?? score.parts[0]?.id) === part.id)
+        .map((c) => ({ pos: Math.round((c.beat - 1) * DIV * 4 / unit), text: c.text }))
+        .sort((a, b) => a.pos - b.pos);
+      const flushChords = (from: number, until: number, staffTag: string) => {
+        while (chordQ.length && chordQ[0].pos < until) {
+          const c = chordQ.shift()!;
+          out.push(harmonyXml(c.text, Math.max(0, c.pos - from), staffTag));
+        }
+      };
       chunks.forEach((ch, ci) => {
         const staffTag = part.clefs.length > 1 ? `<staff>${ch.staff + 1}</staff>` : '';
         let written = 0;
+        if (ci === 0 && !ch.v) flushChords(0, Infinity, staffTag);
         if (!ch.v) {
           out.push(`<note><rest measure="yes"/><duration>${cap}</duration><voice>${ch.voice}</voice>${staffTag}</note>`);
           written = cap;
@@ -93,10 +130,11 @@ export function toMusicXML(score: Score): string {
             if (e.kind === 'note') for (const h of e.hairpin ?? []) {
               dirs.push(below(h === 'end' ? '<wedge type="stop"/>' : `<wedge type="${h === 'cresc' ? 'crescendo' : 'diminuendo'}"/>`));
             }
-            out.push(...dirs);
             let dur = Math.round(baseDur(e.dur, e.dots) * DIV * (tup ? tup.numbase / tup.num : 1));
             const isGrace = e.kind === 'note' && e.grace;
             if (isGrace) dur = 0;
+            if (ci === 0 && !isGrace) flushChords(written, written + dur, staffTag);
+            out.push(...dirs);
             const pitches: (Pitch | null)[] = e.kind === 'rest' ? [null] : e.pitches;
             pitches.forEach((p, k) => {
               const parts: string[] = ['<note>'];
@@ -126,12 +164,16 @@ export function toMusicXML(score: Score): string {
                 if (e.fermata) nots.push('<fermata type="upright"/>');
               }
               if (nots.length) parts.push(`<notations>${nots.join('')}</notations>`);
-              if (k === 0 && e.kind === 'note' && e.lyric !== undefined) {
-                const prev = hyph.get(vk) ?? false;
-                const cont = e.lyric.endsWith('-');
-                const syl = prev ? (cont ? 'middle' : 'end') : cont ? 'begin' : 'single';
-                hyph.set(vk, cont);
-                parts.push(`<lyric number="1"><syllabic>${syl}</syllabic><text>${esc(cont ? e.lyric.slice(0, -1) : e.lyric)}</text></lyric>`);
+              if (k === 0 && e.kind === 'note') {
+                getLyrics(e).forEach((lyr, i) => {
+                  if (lyr == null) return;
+                  const hk = `${vk}#${i}`;
+                  const prev = hyph.get(hk) ?? false;
+                  const cont = lyr.endsWith('-');
+                  const syl = prev ? (cont ? 'middle' : 'end') : cont ? 'begin' : 'single';
+                  hyph.set(hk, cont);
+                  parts.push(`<lyric number="${i + 1}"><syllabic>${syl}</syllabic><text>${esc(cont ? lyr.slice(0, -1) : lyr)}</text></lyric>`);
+                });
               }
               parts.push('</note>');
               out.push(parts.join(''));
@@ -151,6 +193,7 @@ export function toMusicXML(score: Score): string {
             }));
           };
           walk(segment(ch.v, beamLength(c.time)), null);
+          if (ci === 0) flushChords(written, Infinity, staffTag);
         }
         // completa vozes curtas com pausa invisível e volta para a próxima voz
         if (ch.v && written < cap) out.push(`<forward><duration>${cap - written}</duration><voice>${ch.voice}</voice>${staffTag}</forward>`);
