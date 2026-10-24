@@ -161,13 +161,12 @@ export class Workspace {
       const st = JSON.parse(readFileSync(STATE, 'utf8')) as { open: string[]; active: string | null };
       for (const n of st.open) { try { this.open(n, false); } catch { /* arquivo sumiu */ } }
       if (st.active && this.docs.has(st.active)) this.active = st.active;
-    } catch { /* primeiro uso */ }
-    if (!this.docs.size) {
+    } catch {
+      // primeiro uso: abre a primeira partitura que existir (sem criar arquivos)
       const files = this.listFiles().filter((f) => f.kind === 'score');
       if (files.length) this.open(files[0].name, false);
-      else this.create('Sem título', blankScore());
     }
-    if (!this.active) this.active = [...this.docs.keys()][0];
+    if (!this.active) this.active = [...this.docs.keys()][0] ?? null;
     this.saveState();
     this.watchDir();
   }
@@ -267,8 +266,8 @@ export class Workspace {
   close(ref: string) {
     const name = this.resolveName(ref);
     if (!this.docs.delete(name)) return;
-    if (!this.docs.size) this.create('Sem título', blankScore());
-    if (this.active === name) this.active = [...this.docs.keys()].at(-1)!;
+    // pode ficar sem nenhuma aba aberta (antes criava "Sem título" em loop)
+    if (this.active === name) this.active = [...this.docs.keys()].at(-1) ?? null;
     this.saveState();
     this.emit({ type: 'workspace' });
   }
@@ -299,7 +298,13 @@ export class Workspace {
     if (changed) this.emit({ type: 'workspace' });
   }
 
-  get current(): Doc { return this.docs.get(this.active!)!; }
+  get current(): Doc {
+    const d = this.active ? this.docs.get(this.active) : undefined;
+    if (!d) throw new Error('Nenhum arquivo aberto. Use list_files e open_file, ou crie um com score_new.');
+    return d;
+  }
+
+  get currentOrNull(): Doc | null { return (this.active && this.docs.get(this.active)) || null; }
 
   /** Documento alvo de uma ferramenta: o arquivo indicado (aberto e ativado) ou o ativo. */
   target(ref?: string): Doc { return ref ? this.open(ref, true) : this.current; }

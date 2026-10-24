@@ -44,7 +44,13 @@ function workspaceMsg() {
 
 function renderActive() {
   pending = null;
-  const d = workspace.current;
+  const d = workspace.currentOrNull;
+  if (!d) {
+    lastScore = JSON.stringify({ type: 'empty', build: BUILD });
+    broadcast(lastScore);
+    pending = null;
+    return;
+  }
   let msg: object;
   try {
     const meta = new Map<string, NoteMeta>();
@@ -69,7 +75,7 @@ let autoOpened = false;
 workspace.on((e) => {
   if (e.type === 'workspace') {
     broadcast(workspaceMsg());
-    if (lastScore && JSON.parse(lastScore).doc !== workspace.active) { changedIds = new Set(); scheduleRender(); }
+    if (!lastScore || (JSON.parse(lastScore).doc ?? null) !== workspace.active) { changedIds = new Set(); scheduleRender(); }
     return;
   }
   broadcast(workspaceMsg()); // título pode ter mudado
@@ -132,7 +138,7 @@ const httpServer = http.createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(readFileSync(join(ROOT, 'public', 'index.html')));
   }
-  if (url.pathname === '/health') return json(res, 200, { ok: true, name: 'partitura-mcp', active: workspace.active, version: workspace.current.version, viewers: clients.size });
+  if (url.pathname === '/health') return json(res, 200, { ok: true, name: 'partitura-mcp', active: workspace.active, version: workspace.currentOrNull?.version ?? null, viewers: clients.size });
 
   if (url.pathname === '/mcp') {
     if (!originAllowed(req)) return json(res, 403, { error: 'origem não permitida' });
@@ -179,12 +185,13 @@ httpServer.on('upgrade', (req, socket, head) => {
       let m: { type?: string; name?: string; title?: string };
       try { m = JSON.parse(String(data)); } catch { return; }
       try {
-        const d = workspace.current;
-        if (m.type === 'undo' && d.kind === 'score') d.undo();
-        if (m.type === 'redo' && d.kind === 'score') d.redo();
+        const d = workspace.currentOrNull;
+        if (m.type === 'undo' && d?.kind === 'score') d.undo();
+        if (m.type === 'redo' && d?.kind === 'score') d.redo();
         if (m.type === 'open' && m.name) workspace.open(m.name, true);
         if (m.type === 'close' && m.name) workspace.close(m.name);
         if (m.type === 'open-sibelius') {
+          if (!d) throw new Error('Nenhum arquivo aberto.');
           const path = openInSibelius(d);
           ws.send(JSON.stringify({ type: 'toast', message: `Abrindo no Sibelius: ${basename(path)}` }));
         }

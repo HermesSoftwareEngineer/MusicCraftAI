@@ -238,6 +238,18 @@ function show(msg) {
   if (msg.build) { if (window.__build && window.__build !== msg.build) return location.reload(); window.__build = msg.build; }
   if (msg.type === 'workspace') { ws_state = msg; renderWorkspace(); return; }
   if (msg.type === 'toast') { toast(msg.message); return; }
+  if (msg.type === 'empty') {
+    if (player.playing) player.stop();
+    currentDoc = null;
+    $('title').textContent = 'Nenhum arquivo aberto';
+    document.title = 'Partitura ao vivo';
+    $('roBadge').hidden = true; $('label').textContent = '';
+    $('undo').disabled = $('redo').disabled = true;
+    paper.innerHTML = '<div id="empty">Nenhum arquivo aberto. Escolha um na barra lateral (☰) ou crie com “+ Nova”.</div>';
+    score = { notes: [], measures: [] };
+    $('time').textContent = '0:00 / 0:00';
+    return;
+  }
   if (msg.type === 'error') { $('error').style.display = 'block'; $('error').textContent = msg.message; return; }
   $('error').style.display = 'none';
   const switched = msg.doc !== currentDoc;

@@ -70,6 +70,21 @@ for (const n of ['ode_a_alegria.json', 'segunda_peca.json', 'ode-versao-b.json',
 const info = await call('score_info', { file: 'segunda_peca' });
 if (!info.content[0].text.includes('segunda_peca.json')) { fails++; console.log('score_info sem arquivo'); }
 
+// ---- fechar todas as abas não cria arquivos novos (bug do "Sem título" infinito) ----
+const before = (await call('list_files', {})).content[0].text.split(String.fromCharCode(10)).length;
+for (let i = 0; i < 10; i++) {
+  const r: any = await call('close_file', { file: (await c_active()) ?? 'x' });
+  if (r.content[0].text.includes('Nenhum arquivo aberto')) break;
+}
+const after = (await call('list_files', {})).content[0].text.split(String.fromCharCode(10)).length;
+if (after !== before) { fails++; console.log(`FECHAR ABAS CRIOU ARQUIVOS: ${before} -> ${after}`); }
+expectErr(await call('score_info', {}), 'score_info sem arquivo aberto');
+expectOk(await call('open_file', { file: 'ode_a_alegria' }), 'reabrir');
+async function c_active() {
+  const t = (await call('list_files', {})).content[0].text as string;
+  return /^▶ (\S+)/m.exec(t)?.[1] ?? null;
+}
+
 await new Promise((r) => setTimeout(r, 300));
 const scores = frames.filter((f) => f.type === 'score');
 const wsMsgs = frames.filter((f) => f.type === 'workspace');

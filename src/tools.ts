@@ -474,7 +474,7 @@ export function registerTools(server: McpServer, ctx: Ctx) {
     file: z.string(),
   }, ({ file }) => {
     workspace.close(file);
-    return text(`Aba fechada. Ativo agora: ${workspace.active}.`);
+    return text(`Aba fechada. ${workspace.active ? `Ativo agora: ${workspace.active}.` : 'Nenhum arquivo aberto.'}`);
   });
 
   regWs('rename_file', 'Renomeia um arquivo da pasta de partituras.', {
