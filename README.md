@@ -112,6 +112,6 @@ O teste sobe um daemon numa porta separada (4799), conecta um cliente MCP pela p
 
 O botão **Abrir no Sibelius** do visualizador, ou a ferramenta `open_in_sibelius`, exporta o arquivo ativo como MusicXML e o abre no Sibelius instalado. Lá ele toca com o NotePerformer e você faz a diagramação e a impressão. Caminho do executável: detectado automaticamente, ou pela variável `SIBELIUS_EXE`.
 
-> Por que não tocar o NotePerformer direto no navegador? O plugin verifica qual programa o carregou e só funciona dentro de programas de partitura suportados (Sibelius, Dorico, Finale, MuseScore). Contornar essa verificação violaria a licença dele. Por isso a integração passa pelo Sibelius.
+> Por que não tocar o NotePerformer direto no navegador? Fora de um programa de partitura, o plugin se recusa a iniciar. Quando funciona, a primeira coisa que ele registra é o programa que o carregou, o que indica uma verificação do processo hospedeiro. A licença de avaliação não restringe explicitamente em quais programas ele pode ser usado, mas proíbe modificá-lo ou fazer engenharia reversa (2d) e distribuir o som gerado (2a). Optamos por não contornar essa restrição técnica e usar o Sibelius.
 
 O player do navegador usa um sintetizador próprio que respeita as dinâmicas escritas (*p*, *f*, crescendos, acentos).
